@@ -75,8 +75,7 @@ button {
   align-items: center;
 }
 
-.hud-stat,
-.hud-speed {
+.hud-stat {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   backdrop-filter: blur(8px);
@@ -95,29 +94,6 @@ button {
     color: var(--accent);
     transform: scale(1.08);
   }
-}
-
-.hud-speed {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-}
-
-.hud-speed button {
-  border: 0;
-  background: transparent;
-  border-radius: 8px;
-  padding: 4px 10px;
-  font-weight: 700;
-}
-
-.hud-speed button:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.hud-speed button.active {
-  background: var(--accent);
-  color: #2a2110;
 }
 
 /* Toasts */
@@ -344,8 +320,7 @@ button {
 }
 
 @media (max-width: 600px) {
-  .hud-stat,
-  .hud-speed {
+  .hud-stat {
     padding: 6px 10px;
     font-size: 13px;
   }

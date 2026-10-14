@@ -3,6 +3,7 @@ import './style.css';
 import { Animal } from './animals/Animal';
 import { SPECIES, type SpeciesId } from './animals/species';
 import { CameraRig } from './camera';
+import { zooTime } from './clock';
 import { Enclosure, type EnclosureDef } from './enclosure';
 import { Feeder, type FeederDef } from './feeder';
 import { isPath } from './layout';
@@ -12,8 +13,6 @@ import { Hud, type GameState } from './ui/hud';
 import { Inspector } from './ui/inspector';
 import { Crowd, floatText } from './visitors/Crowd';
 
-/** Real seconds per in-game day at 1× speed. */
-const DAY_SECONDS = 360;
 const OPEN_HOUR = 9;
 const CLOSE_HOUR = 18;
 const SIM_STEP = 1 / 30;
@@ -78,7 +77,9 @@ const app = document.getElementById('app')!;
 const world = new World(app);
 const rig = new CameraRig(world.renderer.domElement);
 world.attachCamera(rig.camera);
-const state: GameState = { money: 500, day: 1, hour: 8, speed: 1, paused: false };
+const state: GameState = { money: 500, ...zooTime(Date.now()) };
+/** Dev-only fast-forward on top of the real clock (see __zoo.advance). */
+let clockOffsetMs = 0;
 const hud = new Hud(app, state);
 
 const enclosures: Enclosure[] = [];
@@ -187,19 +188,20 @@ function separate(): void {
   }
 }
 
+const isOpen = (hour: number) => hour >= OPEN_HOUR && hour < CLOSE_HOUR;
+
+/** Read the shared real-time clock and announce new days and opening/closing. */
+function syncClock(): void {
+  const { day, hour } = zooTime(Date.now() + clockOffsetMs);
+  if (day !== state.day) hud.toast(`Day ${day.toLocaleString()} begins`);
+  if (isOpen(hour) !== isOpen(state.hour)) {
+    hud.toast(isOpen(hour) ? 'The zoo is open! 🎟️' : 'The zoo is closed for the night', isOpen(hour) ? 'good' : 'info');
+  }
+  state.day = day;
+  state.hour = hour;
+}
+
 function step(dt: number): void {
-  const prev = state.hour;
-  state.hour += (dt / DAY_SECONDS) * 24;
-  if (state.hour >= 24) {
-    state.hour -= 24;
-    state.day++;
-    hud.toast(`Day ${state.day} begins`);
-  }
-  const hour = Math.floor(state.hour);
-  if (hour !== Math.floor(prev)) {
-    if (hour === OPEN_HOUR) hud.toast('The zoo is open! 🎟️', 'good');
-    if (hour === CLOSE_HOUR) hud.toast('The zoo is closed for the night');
-  }
   for (const a of animals) a.update(dt, state.hour);
   crowd.update(dt, state.hour);
   separate();
@@ -238,18 +240,18 @@ const timer = new THREE.Timer();
 let accumulator = 0;
 world.renderer.setAnimationLoop((time) => {
   timer.update(time);
+  // After a backgrounded tab the clock simply jumps ahead; the animals carry on from where they were.
   const dt = Math.min(timer.getDelta(), 0.1);
-  if (!state.paused) {
-    accumulator += dt * state.speed;
-    while (accumulator >= SIM_STEP) {
-      step(SIM_STEP);
-      accumulator -= SIM_STEP;
-    }
+  syncClock();
+  accumulator += dt;
+  while (accumulator >= SIM_STEP) {
+    step(SIM_STEP);
+    accumulator -= SIM_STEP;
   }
   frame(dt);
 });
 
-// Dev-only console hook: __zoo.advance(60) runs 60 sim-seconds and draws one frame.
+// Dev-only console hook: __zoo.advance(60) fast-forwards 60 seconds (clock included) and draws one frame.
 if (import.meta.env.DEV) {
   Object.assign(window, {
     __zoo: {
@@ -257,6 +259,8 @@ if (import.meta.env.DEV) {
       animals,
       feeders,
       crowd,
+      world,
+      rig,
       focus(name: string) {
         const a = animals.find((x) => x.name === name);
         if (a) {
@@ -265,7 +269,11 @@ if (import.meta.env.DEV) {
         }
       },
       advance(seconds: number) {
-        for (let t = 0; t < seconds; t += SIM_STEP) step(SIM_STEP);
+        for (let t = 0; t < seconds; t += SIM_STEP) {
+          clockOffsetMs += SIM_STEP * 1000;
+          syncClock();
+          step(SIM_STEP);
+        }
         frame(SIM_STEP);
       },
     },

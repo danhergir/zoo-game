@@ -172,6 +172,34 @@ export const HABITATS: HabitatDef[] = [
       treat: null,
     },
   },
+  {
+    // West end of the west wing: a climbing frame with rope bridges, behind glass.
+    enclosure: {
+      name: 'Monkey Grove',
+      points: [[-62, -23], [-100, -23], [-108, 0], [-90, 20], [-60, 12]],
+      groundColor: '#8f8452',
+      rocks: 3,
+      trees: 3,
+      keepClear: [[-78, -20.4, 3]],
+      pond: [-70, 7, 3.5],
+      glass: true,
+      jungleGym: [-86, -2],
+    },
+    feeder: { food: 'fruit', position: [-78, -20.4], capacity: 80, radius: 1.0 },
+    species: 'monkey',
+    count: 6,
+    males: 3,
+    deck: {
+      x: -78,
+      z: -24.85,
+      w: 8,
+      d: 3.3,
+      spots: [-81.4, -80, -76, -74.6].map((x) => ({ x, z: -23.6, yaw: FACE_SOUTH })),
+      feedSpot: { x: -78, z: -23.5, yaw: FACE_SOUTH },
+      animalSpots: [-82.6, -81.2, -74.8, -73.4].map((x) => ({ x, z: -21.6, yaw: FACE_NORTH })),
+      treat: null,
+    },
+  },
 ];
 
 /** Viewing decks, one per habitat. */

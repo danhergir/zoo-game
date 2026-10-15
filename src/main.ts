@@ -172,7 +172,7 @@ function separate(): void {
     for (let j = i + 1; j < animals.length; j++) {
       const a = animals[i];
       const b = animals[j];
-      if (a.enclosure !== b.enclosure) continue;
+      if (a.enclosure !== b.enclosure || a.aloft || b.aloft) continue;
       const dx = b.position.x - a.position.x;
       const dz = b.position.z - a.position.z;
       const d = Math.hypot(dx, dz);
@@ -206,9 +206,12 @@ const simHour = () => (RESET_HOUR + (simSteps * SIM_STEP) / HOUR_SECONDS) % 24;
 
 function resetSimulation(index: number): void {
   const seed = (name: string) => new Rng(`tiny-zoo:reset ${index}:${name}`);
+  for (const e of enclosures) {
+    e.takenSpots.clear();
+    e.gym?.occupants.fill(0);
+  }
   animals.forEach((a, i) => a.reset(seed(`animal ${i}`)));
   for (const f of feeders) f.refill();
-  for (const e of enclosures) e.takenSpots.clear();
   crowd.reset(seed('crowd'));
   keepers.reset(seed('keepers'));
   simReset = index;

@@ -1,6 +1,6 @@
 import type { FoodType } from '../feeder';
 
-export type SpeciesId = 'zebra' | 'elephant' | 'lion' | 'giraffe' | 'penguin';
+export type SpeciesId = 'zebra' | 'elephant' | 'lion' | 'giraffe' | 'penguin' | 'monkey';
 
 export interface SpeciesDef {
   id: SpeciesId;
@@ -32,6 +32,8 @@ export interface SpeciesDef {
   huddles?: boolean;
   /** Come running when a keeper starts feeding. */
   parade?: boolean;
+  /** Chance to head for the climbing frame when idle (monkeys); they sleep up there too. */
+  climb?: number;
   names: string[];
 }
 
@@ -99,6 +101,22 @@ export const SPECIES: Record<SpeciesId, SpeciesDef> = {
     huddles: true,
     parade: true,
     names: ['Pingu', 'Waddles', 'Flipper', 'Tux', 'Skipper', 'Rico', 'Kowalski', 'Pebbles', 'Mumble', 'Gloria'],
+  },
+  monkey: {
+    id: 'monkey',
+    label: 'Monkey',
+    food: 'fruit',
+    speed: 2.3,
+    radius: 0.45,
+    hungerRate: 0.007,
+    eatRate: 0.18,
+    portion: 10,
+    tireRate: 0.006,
+    hungryAt: 0.45,
+    idleChance: 0.2,
+    curiosity: 0.5,
+    climb: 0.55,
+    names: ['Coco', 'Bobo', 'Kiki', 'Momo', 'Banjo', 'Pip', 'Mango', 'Zuzu', 'Tiko'],
   },
   lion: {
     id: 'lion',

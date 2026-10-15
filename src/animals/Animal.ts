@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import type { Enclosure } from '../enclosure';
+import { ROPE_SAG, type Enclosure } from '../enclosure';
 import type { Feeder } from '../feeder';
 import type { Spot } from '../layout';
 import type { Rng } from '../rng';
@@ -17,7 +17,11 @@ export type AnimalState =
   | 'toFence'
   | 'greet'
   | 'toTree'
-  | 'browse';
+  | 'browse'
+  | 'toPole'
+  | 'climb'
+  | 'perch'
+  | 'swing';
 
 const STATE_LABEL: Record<AnimalState, string> = {
   idle: 'Relaxing',
@@ -30,6 +34,10 @@ const STATE_LABEL: Record<AnimalState, string> = {
   greet: 'Saying hello to visitors',
   toTree: 'Heading to a tree',
   browse: 'Nibbling leaves',
+  toPole: 'Heading for the climbing frame',
+  climb: 'Climbing',
+  perch: 'Hanging out up high',
+  swing: 'Swinging across',
 };
 
 /** States an animal can drop when it gets hungry or sleepy. */
@@ -86,6 +94,17 @@ export class Animal {
   private treatTime = 0;
   /** Tree being browsed (giraffes). */
   private tree: { x: number; z: number } | null = null;
+  /** Climbers: height above ground and which climbing-frame platform they're on (-1 = on the ground). */
+  private elevation = 0;
+  private platform = -1;
+  /** Platform being walked to, and the spot at the foot of its pole. */
+  private targetPlatform = -1;
+  private readonly poleBase = { x: 0, z: 0 };
+  private climbDir = 0;
+  private swingFrom = -1;
+  private swingT = 0;
+  /** Heading up the frame to sleep. */
+  private sleepUp = false;
   /** Swimmers: seconds until the next dive, and how long the current dive lasts. */
   private diveIn = 0;
   private diveTime = 0;
@@ -145,9 +164,32 @@ export class Animal {
     this.tree = null;
     this.diveIn = 0;
     this.diveTime = 0;
+    this.elevation = 0;
+    this.platform = -1;
+    this.targetPlatform = -1;
+    this.sleepUp = false;
     this.state = 'sleep';
     this.stateTime = 0;
     this.moveTime = 0;
+    // Climbers start the day asleep up on the frame, where they spent the night.
+    const g = this.enclosure.gym;
+    if (this.species.climb && g) {
+      const free = g.platforms.map((_, i) => i).filter((i) => g.occupants[i] < 2);
+      if (free.length) {
+        this.platform = rng.pick(free);
+        g.occupants[this.platform]++;
+        const p = g.platforms[this.platform];
+        const a = rng.float(0, Math.PI * 2);
+        this.root.position.set(p.x + Math.cos(a) * 0.5, 0, p.z + Math.sin(a) * 0.5);
+        this.elevation = p.h;
+        this.root.position.y = p.h;
+      }
+    }
+  }
+
+  /** Up on the climbing frame (monkeys). */
+  get aloft(): boolean {
+    return this.platform >= 0;
   }
 
   /** Can this animal go into the pond? */
@@ -198,6 +240,18 @@ export class Animal {
       case 'browse':
         this.browse(dt, hour);
         break;
+      case 'toPole':
+        this.walk(dt, hour);
+        break;
+      case 'climb':
+        this.climb(dt, hour);
+        break;
+      case 'perch':
+        this.perch(dt, hour);
+        break;
+      case 'swing':
+        this.swing(dt, hour);
+        break;
       case 'greet':
         this.greet(dt, hour);
         break;
@@ -208,6 +262,7 @@ export class Animal {
         break;
     }
 
+    this.root.position.y = this.elevation;
     this.animate(dt);
     this.updateBubble();
   }
@@ -230,6 +285,7 @@ export class Animal {
 
   /** Called by the separation pass; keeps the animal inside its fence. */
   nudge(dx: number, dz: number): void {
+    if (this.aloft) return;
     const p = this.root.position;
     if (this.enclosure.walkable(p.x + dx, p.z + dz, this.radius, this.swims)) {
       p.x += dx;
@@ -256,6 +312,18 @@ export class Animal {
   /** Needs that override whatever the animal is doing. */
   private checkInterrupts(hour: number): void {
     const s = this.state;
+    if (this.aloft) {
+      // Up on the frame: wake in the morning, come down for food, sleep at bedtime.
+      if (s === 'sleep') {
+        const rested = this.isBedtime(hour) ? false : this.energy > 0.5;
+        if (rested || (this.hunger < 0.15 && this.feeder.hasFood)) this.decideAloft(hour);
+      } else if (s === 'perch' && this.hunger < this.species.hungryAt && this.feeder.hasFood) {
+        this.startClimbDown();
+      } else if (s === 'perch' && this.isBedtime(hour)) {
+        this.setState('sleep');
+      }
+      return;
+    }
     if (s === 'sleep') {
       const rested = this.isBedtime(hour) ? false : this.energy > 0.5;
       const starving = this.hunger < 0.15 && this.feeder.hasFood;
@@ -278,6 +346,10 @@ export class Animal {
 
   private decide(hour: number): void {
     const s = this.species;
+    if (this.aloft) {
+      this.decideAloft(hour);
+      return;
+    }
     if (this.hunger < s.hungryAt && this.feeder.hasFood) {
       this.goToFeeder();
     } else if (this.isBedtime(hour) && this.hunger > 0.25) {
@@ -288,6 +360,8 @@ export class Animal {
       // Walking over to see the visitors.
     } else if (s.browse && this.enclosure.trees.length && this.rng.chance(s.browse) && this.goToTree()) {
       // Off to eat leaves.
+    } else if (s.climb && this.enclosure.gym && this.rng.chance(s.climb) && this.goToPole(false)) {
+      // Off to the climbing frame.
     } else if (s.swim && this.enclosure.pond && this.rng.chance(s.swim)) {
       // A swim: somewhere in the pond.
       this.enclosure.pondPoint(this.rng, this.target);
@@ -307,6 +381,8 @@ export class Animal {
 
   /** Huddlers walk to the group's sleeping spot first; everyone else sleeps where they are. */
   private goToSleep(): void {
+    // Monkeys sleep up on the climbing frame.
+    if (this.species.climb && this.enclosure.gym && this.goToPole(true)) return;
     const h = this.enclosure.huddle;
     if (!this.species.huddles || !h) {
       this.setState('sleep');
@@ -316,6 +392,142 @@ export class Animal {
     const r = this.rng.float(0.3, 1.8);
     this.target.set(h.x + Math.cos(a) * r, 0, h.z + Math.sin(a) * r);
     this.setState('toBed');
+  }
+
+  /** Walk to the foot of a pole whose platform has room (at most two monkeys per platform). */
+  private goToPole(toSleep: boolean): boolean {
+    const g = this.enclosure.gym;
+    if (!g) return false;
+    const free = g.platforms.map((_, i) => i).filter((i) => g.occupants[i] < 2);
+    if (!free.length) return false;
+    const i = this.rng.pick(free);
+    if (!this.pickPoleBase(i)) return false;
+    this.targetPlatform = i;
+    this.sleepUp = toSleep;
+    this.target.set(this.poleBase.x, 0, this.poleBase.z);
+    this.setState('toPole');
+    return true;
+  }
+
+  /** A walkable spot at the foot of platform `i`'s pole. */
+  private pickPoleBase(i: number): boolean {
+    const p = this.enclosure.gym!.platforms[i];
+    for (let k = 0; k < 8; k++) {
+      const a = this.rng.float(0, Math.PI * 2);
+      const x = p.x + Math.cos(a) * 1.05;
+      const z = p.z + Math.sin(a) * 1.05;
+      if (!this.enclosure.walkable(x, z, this.radius)) continue;
+      this.poleBase.x = x;
+      this.poleBase.z = z;
+      return true;
+    }
+    return false;
+  }
+
+  /** Hug the pole, between its foot and the pole itself. */
+  private hugPole(): void {
+    const p = this.enclosure.gym!.platforms[this.platform];
+    const dx = this.poleBase.x - p.x;
+    const dz = this.poleBase.z - p.z;
+    const len = Math.hypot(dx, dz) || 1;
+    this.root.position.set(p.x + (dx / len) * 0.32, 0, p.z + (dz / len) * 0.32);
+    this.yaw = Math.atan2(-dx, -dz);
+  }
+
+  private startClimbUp(i: number): void {
+    this.enclosure.gym!.occupants[i]++;
+    this.platform = i;
+    this.climbDir = 1;
+    this.hugPole();
+    this.setState('climb');
+  }
+
+  private startClimbDown(): void {
+    if (!this.pickPoleBase(this.platform)) {
+      this.setState('perch', this.rng.float(2, 4));
+      return;
+    }
+    this.climbDir = -1;
+    this.hugPole();
+    this.setState('climb');
+  }
+
+  private climb(dt: number, hour: number): void {
+    const g = this.enclosure.gym!;
+    const p = g.platforms[this.platform];
+    this.hugPole();
+    this.elevation += this.climbDir * 1.4 * dt;
+    if (this.climbDir > 0 && this.elevation >= p.h) {
+      this.elevation = p.h;
+      this.arriveOnPlatform(hour);
+    } else if (this.climbDir < 0 && this.elevation <= 0) {
+      this.elevation = 0;
+      this.root.position.set(this.poleBase.x, 0, this.poleBase.z);
+      g.occupants[this.platform]--;
+      this.platform = -1;
+      this.setState('idle', this.rng.float(1, 3));
+    }
+  }
+
+  /** Settle on the current platform, at a random spot near its edge. */
+  private arriveOnPlatform(hour: number): void {
+    const p = this.enclosure.gym!.platforms[this.platform];
+    const a = this.rng.float(0, Math.PI * 2);
+    this.root.position.set(p.x + Math.cos(a) * 0.5, 0, p.z + Math.sin(a) * 0.5);
+    this.yaw = Math.atan2(Math.cos(a), Math.sin(a));
+    this.elevation = p.h;
+    if (this.sleepUp || this.isBedtime(hour)) {
+      this.sleepUp = false;
+      this.setState('sleep');
+    } else {
+      this.setState('perch', this.rng.float(5, 12));
+    }
+  }
+
+  private perch(_dt: number, hour: number): void {
+    if (this.stateTime <= 0) this.decideAloft(hour);
+  }
+
+  /** Up on the frame and done perching: swing to another platform, climb down, or stay a while. */
+  private decideAloft(hour: number): void {
+    if (this.hunger < this.species.hungryAt && this.feeder.hasFood) return this.startClimbDown();
+    if (this.isBedtime(hour)) return this.setState('sleep');
+    const r = this.rng.next();
+    if (r < 0.45 && this.startSwing()) return;
+    if (r < 0.75) return this.startClimbDown();
+    this.setState('perch', this.rng.float(4, 10));
+  }
+
+  private startSwing(): boolean {
+    const g = this.enclosure.gym!;
+    const options = g.ropes
+      .filter(([a, b]) => a === this.platform || b === this.platform)
+      .map(([a, b]) => (a === this.platform ? b : a))
+      .filter((to) => g.occupants[to] < 2);
+    if (!options.length) return false;
+    const to = this.rng.pick(options);
+    g.occupants[this.platform]--;
+    g.occupants[to]++;
+    this.swingFrom = this.platform;
+    this.platform = to;
+    this.swingT = 0;
+    this.setState('swing');
+    return true;
+  }
+
+  /** Hand over hand along the rope, following the same sagging curve the rope is drawn with. */
+  private swing(dt: number, hour: number): void {
+    const g = this.enclosure.gym!;
+    const a = g.platforms[this.swingFrom];
+    const b = g.platforms[this.platform];
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    this.swingT = Math.min(1, this.swingT + (dt * 1.5) / len);
+    const t = this.swingT;
+    const mid = (a.h + b.h) / 2 - ROPE_SAG * 2;
+    this.root.position.set(a.x + (b.x - a.x) * t, 0, a.z + (b.z - a.z) * t);
+    this.elevation = (1 - t) * (1 - t) * a.h + 2 * t * (1 - t) * mid + t * t * b.h;
+    this.yaw = Math.atan2(b.x - a.x, b.z - a.z);
+    if (t >= 1) this.arriveOnPlatform(hour);
   }
 
   /** Pick a tree and a spot under its crown to browse from. */
@@ -380,7 +592,7 @@ export class Animal {
     this.state = state;
     this.stateTime = duration;
     this.moveTime = 0;
-    if (state === 'wander' || state === 'toFeeder' || state === 'toFence' || state === 'toTree' || state === 'toBed') {
+    if (['wander', 'toFeeder', 'toFence', 'toTree', 'toBed', 'toPole'].includes(state)) {
       this.path = this.enclosure.findPath(this.root.position, this.target, this.radius, this.swims) ?? [this.target.clone()];
     }
   }
@@ -406,6 +618,7 @@ export class Animal {
       else if (this.state === 'toFence' && arrived && dist < 1) this.setState('greet', this.rng.float(8, 15));
       else if (this.state === 'toTree' && arrived && dist < 1) this.setState('browse', this.rng.float(6, 12));
       else if (this.state === 'toBed') this.setState('sleep');
+      else if (this.state === 'toPole' && arrived && dist < 1) this.startClimbUp(this.targetPlatform);
       else this.setState('idle', this.rng.float(1, 4));
       return;
     }
@@ -483,7 +696,7 @@ export class Animal {
     const eating = this.state === 'eat';
     const greeting = this.state === 'greet';
     const browsing = this.state === 'browse';
-    if (!['wander', 'toFeeder', 'toFence', 'toTree', 'toBed'].includes(this.state)) {
+    if (!['wander', 'toFeeder', 'toFence', 'toTree', 'toBed', 'toPole'].includes(this.state)) {
       this.walking = false;
     }
 
@@ -560,9 +773,52 @@ export class Animal {
       if (asleep) [base, rest] = [1.15, 0.4];
       m.neck.forEach((seg, i) => (seg.rotation.x = lerp(seg.rotation.x, i === 0 ? base : rest, k * 0.6)));
     }
+    if (this.species.climb !== undefined) this.poseClimber(k);
     for (const ear of m.ears) {
       ear.pivot.rotation.y = ear.rest + Math.sign(ear.rest) * Math.sin(this.time * 1.7) * 0.18;
     }
+  }
+
+  /**
+   * Monkey poses that the quadruped walk cycle can't express: hugging the pole
+   * while climbing, hanging from the rope while swinging, sitting up on a
+   * platform (waving at visitors when greeting).
+   */
+  private poseClimber(k: number): void {
+    const m = this.model;
+    const st = this.state;
+    const sitting = st === 'perch' || st === 'greet' || st === 'sleep' || st === 'idle' || st === 'eat';
+    let pitch: number;
+    let y: number;
+    let roll = 0;
+    let head: number;
+    let limbs: [number, number][]; // [hip, knee] for front-left, front-right, back-left, back-right
+    if (st === 'climb') {
+      const c = Math.sin(this.time * 9);
+      [pitch, y, head] = [-1.45, 0, 1.2];
+      limbs = [[-0.4 + c * 0.6, 0.4], [-0.4 - c * 0.6, 0.4], [0.5 - c * 0.4, 0.8], [0.5 + c * 0.4, 0.8]];
+    } else if (st === 'swing') {
+      const c = Math.sin(this.time * 7);
+      [pitch, y, head] = [-1.45, -0.9, 1.2];
+      roll = Math.sin(this.time * 6) * 0.2;
+      limbs = [[-1.6 + c * 0.45, 0], [-1.6 - c * 0.45, 0], [0.2 + c * 0.2, 0.3], [0.2 - c * 0.2, 0.3]];
+    } else if (sitting && !this.walking) {
+      [pitch, y, head] = [st === 'sleep' ? -0.6 : -0.95, -0.18, st === 'sleep' ? 1.3 : 0.8];
+      if (st === 'eat') head = 1.1;
+      limbs = [[0.95, 0], [0.95, 0], [-1.3, 1.5], [-1.3, 1.5]];
+      if (st === 'greet') limbs[0] = [-2.4 + Math.sin(this.time * 10) * 0.35, 0.2]; // waving at the visitors
+    } else {
+      m.pose.rotation.x = lerp(m.pose.rotation.x, 0, k);
+      return;
+    }
+    m.pose.rotation.x = lerp(m.pose.rotation.x, pitch, k);
+    m.pose.rotation.z = lerp(m.pose.rotation.z, roll, k);
+    m.pose.position.y = lerp(m.pose.position.y, y, k);
+    m.head.rotation.x = lerp(m.head.rotation.x, head, k);
+    m.legs.forEach((leg, i) => {
+      leg.hip.rotation.x = lerp(leg.hip.rotation.x, limbs[i][0], k);
+      leg.knee.rotation.x = lerp(leg.knee.rotation.x, limbs[i][1], k);
+    });
   }
 
   private updateBubble(): void {

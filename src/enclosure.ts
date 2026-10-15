@@ -20,6 +20,8 @@ export interface EnclosureDef {
   glass?: boolean;
   /** Icy look: pale shore, no reeds (penguins). */
   icy?: boolean;
+  /** A climbing frame centered at [x, z] (monkeys). */
+  jungleGym?: [number, number];
   /** Where the group gathers to sleep, as [x, z] (penguins huddle). */
   huddle?: [number, number];
   /** Watering hole as [x, z, radius]. */
@@ -49,6 +51,8 @@ const waterMat = new THREE.MeshStandardMaterial({
   opacity: 0.88,
 });
 const shoreMat = new THREE.MeshStandardMaterial({ color: '#8d7a55', roughness: 1 });
+/** How far ropes sag at their midpoint; a quadratic curve dipping by 2x this in its control point. */
+export const ROPE_SAG = 0.6;
 const iceShoreMat = new THREE.MeshStandardMaterial({ color: '#e4eef2', roughness: 0.6 });
 const deepWaterMat = new THREE.MeshStandardMaterial({
   color: '#16618c',
@@ -66,6 +70,9 @@ export class Enclosure {
   private readonly obstacles: Obstacle[] = [];
   private readonly min = new THREE.Vector2(Infinity, Infinity);
   private readonly max = new THREE.Vector2(-Infinity, -Infinity);
+  /** Climbing frame: platforms on poles, joined by ropes. `occupants` counts monkeys per platform. */
+  gym: { platforms: { x: number; z: number; h: number }[]; ropes: [number, number][]; occupants: number[] } | null = null;
+
   /** Icy ground: no plants grow here. */
   get icy(): boolean {
     return this.def.icy === true;
@@ -102,6 +109,7 @@ export class Enclosure {
     this.buildFence();
     for (const [x, z, r] of def.keepClear ?? []) this.obstacles.push({ x, z, r, solid: false });
     if (def.pond) this.addPond(...def.pond);
+    if (def.jungleGym) this.addJungleGym(...def.jungleGym);
     for (let i = 0; i < (def.rocks ?? 0); i++) this.addRock();
     for (let i = 0; i < (def.trees ?? 0); i++) this.addTree(def.tallTrees ? 1.45 : 1);
     // Everything in an enclosure is static: bake it into a handful of meshes.
@@ -248,6 +256,52 @@ export class Enclosure {
         this.group.add(rail);
       }
     }
+  }
+
+  /**
+   * Four platforms on poles around a taller central tower, with rope bridges
+   * around the ring and out to the tower.
+   */
+  private addJungleGym(cx: number, cz: number): void {
+    const wood = new THREE.MeshStandardMaterial({ color: '#7a5434', roughness: 0.9 });
+    const rope = new THREE.MeshStandardMaterial({ color: '#b08a55', roughness: 1 });
+    const platforms = [
+      { x: cx, z: cz, h: 5.2 },
+      ...[3.6, 4.4, 3.2, 4.0].map((h, i) => {
+        const a = Math.PI / 4 + (i * Math.PI) / 2;
+        return { x: cx + Math.cos(a) * 5.5, z: cz + Math.sin(a) * 5.5, h };
+      }),
+    ];
+    const ropes: [number, number][] = [
+      [1, 2],
+      [2, 3],
+      [3, 4],
+      [4, 1],
+      [0, 1],
+      [0, 2],
+      [0, 3],
+      [0, 4],
+    ];
+    for (const p of platforms) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, p.h, 8), wood);
+      pole.position.set(p.x, p.h / 2, p.z);
+      const deck = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 0.14, 12), wood);
+      deck.position.set(p.x, p.h, p.z);
+      pole.castShadow = deck.castShadow = deck.receiveShadow = true;
+      this.group.add(pole, deck);
+      this.obstacles.push({ x: p.x, z: p.z, r: 0.4, solid: true });
+    }
+    for (const [a, b] of ropes) {
+      const pa = platforms[a];
+      const pb = platforms[b];
+      // Rope sags in the middle (the same curve monkeys swing along).
+      const mid = new THREE.Vector3((pa.x + pb.x) / 2, (pa.h + pb.h) / 2 - ROPE_SAG * 2, (pa.z + pb.z) / 2);
+      const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(pa.x, pa.h, pa.z), mid, new THREE.Vector3(pb.x, pb.h, pb.z));
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 14, 0.05, 5), rope);
+      tube.castShadow = true;
+      this.group.add(tube);
+    }
+    this.gym = { platforms, ropes, occupants: platforms.map(() => 0) };
   }
 
   /** Low glass panels on slim steel posts, so visitors see right in (penguins). */

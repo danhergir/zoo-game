@@ -3,7 +3,7 @@ import type { Enclosure } from './enclosure';
 import type { Rng } from './rng';
 import { mergeChildren } from './merge';
 
-export type FoodType = 'hay' | 'meat' | 'fish';
+export type FoodType = 'hay' | 'meat' | 'fish' | 'fruit';
 
 export interface FeederDef {
   name: string;
@@ -66,6 +66,22 @@ export class Feeder {
         stick.position.set(Math.cos(a) * d, 0.6 + Math.random() * 0.15, Math.sin(a) * d);
         stick.rotation.set(Math.PI / 2 + (Math.random() - 0.5), Math.random() * Math.PI, 0);
         this.foodMesh.add(stick);
+      }
+    } else if (def.food === 'fruit') {
+      // Bananas, apples and oranges.
+      const kinds = [
+        { geo: new THREE.CylinderGeometry(0.05, 0.05, 0.32, 6).rotateZ(Math.PI / 2), color: '#f2d335' },
+        { geo: new THREE.SphereGeometry(0.1, 8, 6), color: '#d63a32' },
+        { geo: new THREE.SphereGeometry(0.1, 8, 6), color: '#f0902a' },
+      ].map((k) => ({ geo: k.geo, mat: new THREE.MeshStandardMaterial({ color: k.color, roughness: 0.6 }) }));
+      for (let i = 0; i < 16; i++) {
+        const k = kinds[i % kinds.length];
+        const a = Math.random() * Math.PI * 2;
+        const d = Math.random() * r * 0.6;
+        const fruit = new THREE.Mesh(k.geo, k.mat);
+        fruit.position.set(Math.cos(a) * d, 0.38 + Math.random() * 0.2, Math.sin(a) * d);
+        fruit.rotation.y = Math.random() * Math.PI;
+        this.foodMesh.add(fruit);
       }
     } else if (def.food === 'fish') {
       // A heap of silvery fish.

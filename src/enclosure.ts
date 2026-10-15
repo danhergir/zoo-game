@@ -14,6 +14,8 @@ export interface EnclosureDef {
   trees?: number;
   /** Spots ([x, z, radius]) kept free of scenery, e.g. around the feeder. */
   keepClear?: [number, number, number][];
+  /** Taller acacias whose canopy sits above a giraffe's head. */
+  tallTrees?: boolean;
   /** Watering hole as [x, z, radius]. */
   pond?: [number, number, number];
 }
@@ -48,6 +50,8 @@ export class Enclosure {
   private readonly obstacles: Obstacle[] = [];
   private readonly min = new THREE.Vector2(Infinity, Infinity);
   private readonly max = new THREE.Vector2(-Infinity, -Infinity);
+  /** Tree trunks (for browsers like giraffes). */
+  readonly trees: { x: number; z: number }[] = [];
   /** How many visitors are watching from this enclosure's deck right now. */
   audience = 0;
   /** Spots just inside the fence, facing the deck, where animals come to say hello. */
@@ -70,7 +74,7 @@ export class Enclosure {
     for (const [x, z, r] of def.keepClear ?? []) this.obstacles.push({ x, z, r, solid: false });
     if (def.pond) this.addPond(...def.pond);
     for (let i = 0; i < (def.rocks ?? 0); i++) this.addRock();
-    for (let i = 0; i < (def.trees ?? 0); i++) this.addTree();
+    for (let i = 0; i < (def.trees ?? 0); i++) this.addTree(def.tallTrees ? 1.45 : 1);
     // Everything in an enclosure is static: bake it into a handful of meshes.
     const merged = mergeStatic(this.group);
     this.group.clear();
@@ -250,17 +254,18 @@ export class Enclosure {
   }
 
   /** Flat-topped acacia-style tree. */
-  private addTree(): void {
+  /** `height` scales the trunk so the canopy can sit higher (giraffe trees). */
+  private addTree(height: number): void {
     const pos = this.randomPoint(4, this.rng);
     const tree = new THREE.Group();
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.38, 4.2, 7), barkMat);
-    trunk.position.y = 2.1;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.38, 4.2 * height, 7), barkMat);
+    trunk.position.y = 2.1 * height;
     trunk.rotation.z = (this.rng.next() - 0.5) * 0.15;
     tree.add(trunk);
     for (const [x, y, z, r] of [[0, 4.7, 0, 3], [1.6, 4.4, 0.6, 1.8], [-1.5, 4.5, -0.5, 2]]) {
       const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), leafMat);
       crown.scale.set(1.2, 0.3, 1.2);
-      crown.position.set(x, y, z);
+      crown.position.set(x, y + 4.4 * (height - 1), z);
       tree.add(crown);
     }
     tree.traverse((o) => (o.castShadow = true));
@@ -268,5 +273,6 @@ export class Enclosure {
     tree.rotation.y = this.rng.next() * Math.PI;
     this.group.add(tree);
     this.obstacles.push({ x: pos.x, z: pos.z, r: 0.8, solid: true });
+    this.trees.push({ x: pos.x, z: pos.z });
   }
 }

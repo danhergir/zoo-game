@@ -3,7 +3,7 @@ import './style.css';
 import { Animal } from './animals/Animal';
 import { SPECIES } from './animals/species';
 import { CameraRig } from './camera';
-import { HOUR_SECONDS, RESET_HOUR, lastReset, zooTime } from './clock';
+import { DAY_SECONDS, HOUR_SECONDS, RESET_HOUR, lastReset, zooTime } from './clock';
 import { Enclosure } from './enclosure';
 import { Feeder } from './feeder';
 import { HABITATS } from './habitats';
@@ -316,6 +316,13 @@ if (import.meta.env.DEV) {
         let h = 2166136261;
         for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
         return `${(h >>> 0).toString(16)} (${crowd.visitors.length} guests, ${keepers.active.length} keepers)`;
+      },
+      /** Jump the dev clock to `steps` after reset `index`; the live loop carries on from there. */
+      goto(index: number, steps: number): void {
+        const start = lastReset(Date.now()).startMs + (index - lastReset(Date.now()).index) * DAY_SECONDS * 1000;
+        clockOffsetMs = start + steps * SIM_STEP * 1000 - Date.now();
+        catchUp(Date.now() + clockOffsetMs);
+        frame(SIM_STEP);
       },
       /** Run `count` more simulation steps from the current state (no reset). */
       steps(count: number): void {

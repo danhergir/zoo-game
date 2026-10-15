@@ -56,6 +56,53 @@ export function stripeMaterial(axis: 'y' | 'z', frequency: number): THREE.MeshSt
   return m;
 }
 
+/**
+ * Reticulated giraffe coat: brown patches separated by pale lines, from a
+ * 3D cell pattern in the mesh's local space (so it wraps any shape).
+ */
+export function spotMaterial(frequency: number): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ color: '#f2dcab', roughness: 0.85 });
+  m.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSpotPos;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSpotPos = position;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        /* glsl */ `#include <common>
+        varying vec3 vSpotPos;
+        vec3 spotHash(vec3 p) {
+          p = vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)));
+          return fract(sin(p) * 43758.5453123);
+        }
+        // Distance between the nearest and second-nearest cell centers: small along cell borders.
+        float spotEdge(vec3 x) {
+          vec3 n = floor(x);
+          vec3 f = fract(x);
+          float f1 = 8.0;
+          float f2 = 8.0;
+          for (int k = -1; k <= 1; k++)
+            for (int j = -1; j <= 1; j++)
+              for (int i = -1; i <= 1; i++) {
+                vec3 g = vec3(float(i), float(j), float(k));
+                vec3 r = g + spotHash(n + g) - f;
+                float d = dot(r, r);
+                if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
+              }
+          return sqrt(f2) - sqrt(f1);
+        }`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        /* glsl */ `#include <color_fragment>
+        float patchMask = smoothstep(0.07, 0.13, spotEdge(vSpotPos * ${frequency.toFixed(3)}));
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.25, 0.085, 0.02), patchMask);`,
+      );
+  };
+  m.customProgramCacheKey = () => `spots-${frequency}`;
+  return m;
+}
+
 function canvasTexture(size: number, draw: (ctx: CanvasRenderingContext2D) => void): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;

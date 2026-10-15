@@ -59,5 +59,5 @@ export function buildZebra(): AnimalModel {
   );
 
   root.add(hitbox(1.3, 2.4, 2.6, 1.2));
-  return { root, pose, head, legs, tail, trunk: [], ears: [], legLength: L, height: L + 1.55, eatPitch: 1.4 };
+  return { root, pose, head, legs, tail, trunk: [], neck: [], ears: [], legLength: L, height: L + 1.55, eatPitch: 1.4 };
 }

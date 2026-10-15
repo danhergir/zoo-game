@@ -11,6 +11,8 @@ export interface FeederDef {
   position: [number, number];
   capacity: number;
   radius: number;
+  /** Raise the tub on posts (for tall animals). */
+  elevation?: number;
 }
 
 
@@ -83,6 +85,18 @@ export class Feeder {
     }
     for (const m of [tub, base, ...bands]) m.castShadow = m.receiveShadow = true;
     this.foodMesh.traverse((o) => (o.castShadow = true));
+    const lift = def.elevation ?? 0;
+    if (lift > 0) {
+      // Posts from the ground up to the raised tub.
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, lift, 6), wood);
+        post.position.set(Math.cos(a) * r * 0.75, -lift / 2, Math.sin(a) * r * 0.75);
+        post.castShadow = true;
+        this.root.add(post);
+      }
+      this.root.position.y = lift;
+    }
     mergeChildren(this.foodMesh);
     this.root.add(tub, base, ...bands, this.foodMesh);
     mergeChildren(this.root);

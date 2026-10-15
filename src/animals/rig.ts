@@ -25,6 +25,8 @@ export interface AnimalModel {
   tail: THREE.Group | null;
   /** Elephant trunk segments, root first. */
   trunk: THREE.Group[];
+  /** Neck segments, base first (giraffe); bend them forward with rotation.x > 0. */
+  neck: THREE.Group[];
   /** Pivots that flap (elephant ears), with their resting yaw. */
   ears: { pivot: THREE.Group; rest: number }[];
   legLength: number;
@@ -48,6 +50,10 @@ export function mat(color: string, roughness = 0.85, flat = false): THREE.MeshSt
 // Geometry helpers. Scaling is baked into geometry so outlines stay even.
 export function ell(rx: number, ry: number, rz: number, seg = 20): THREE.BufferGeometry {
   return new THREE.SphereGeometry(1, seg, Math.round(seg * 0.7)).scale(rx, ry, rz);
+}
+/** Cylinder rising up from its origin. */
+export function stem(rBottom: number, rTop: number, length: number, seg = 10): THREE.BufferGeometry {
+  return new THREE.CylinderGeometry(rTop, rBottom, length, seg).translate(0, length / 2, 0);
 }
 /** Cylinder hanging down from its origin. */
 export function limb(rTop: number, rBottom: number, length: number, seg = 10): THREE.BufferGeometry {

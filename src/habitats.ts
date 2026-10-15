@@ -1,8 +1,9 @@
 import type { SpeciesId } from './animals/species';
 import type { EnclosureDef } from './enclosure';
-import { FACE_EAST, FACE_NORTH, FACE_WEST } from './facing';
+import { FACE_EAST, FACE_NORTH, FACE_SOUTH, FACE_WEST } from './facing';
 import type { FeederDef } from './feeder';
 import type { Spot } from './layout';
+import type { Treat } from './visitors/Visitor';
 
 /**
  * Every exhibit in the zoo: its fenced enclosure, feeder, residents and the
@@ -21,7 +22,7 @@ export interface DeckDef {
   /** Just inside the fence, facing the deck: where curious animals come to say hello. */
   animalSpots: Spot[];
   /** Treats visitors can hand over here, or null if animals here aren't fed by hand. */
-  treat: 'carrot' | 'apple' | null;
+  treat: Treat | null;
 }
 
 export interface Deck extends DeckDef {
@@ -112,6 +113,33 @@ export const HABITATS: HabitatDef[] = [
       feedSpot: { x: 0, z: -36.4, yaw: FACE_NORTH },
       animalSpots: [-3.4, 3.4].map((x) => ({ x, z: -38.4, yaw: 0 })),
       treat: null,
+    },
+  },
+  {
+    // North-west of the west wing: tall acacias to browse and a raised hay rack.
+    enclosure: {
+      name: 'Giraffe Heights',
+      points: [[-27, -36.5], [-70, -36.5], [-84, -58], [-64, -86], [-30, -80]],
+      groundColor: '#c8b27a',
+      rocks: 3,
+      trees: 5,
+      tallTrees: true,
+      keepClear: [[-48, -39, 3.5]],
+      pond: [-62, -64, 4],
+    },
+    feeder: { food: 'hay', position: [-48, -39], capacity: 130, radius: 1.2, elevation: 2.3 },
+    species: 'giraffe',
+    count: 3,
+    males: 1,
+    deck: {
+      x: -48,
+      z: -34.25,
+      w: 8,
+      d: 3.5,
+      spots: [-51, -49.6, -46.4, -45].map((x) => ({ x, z: -35.5, yaw: FACE_NORTH })),
+      feedSpot: { x: -48, z: -35.7, yaw: FACE_NORTH },
+      animalSpots: [-51.8, -44.2].map((x) => ({ x, z: -39.6, yaw: FACE_SOUTH })),
+      treat: 'leaves',
     },
   },
 ];

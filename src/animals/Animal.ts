@@ -7,7 +7,7 @@ import type { Rng } from '../rng';
 import { buildModel, poseLegs, type AnimalModel } from './models';
 import type { SpeciesDef } from './species';
 
-export type AnimalState = 'idle' | 'wander' | 'toFeeder' | 'eat' | 'sleep' | 'toFence' | 'greet';
+export type AnimalState = 'idle' | 'wander' | 'toFeeder' | 'eat' | 'sleep' | 'toFence' | 'greet' | 'toTree' | 'browse';
 
 const STATE_LABEL: Record<AnimalState, string> = {
   idle: 'Relaxing',
@@ -17,10 +17,12 @@ const STATE_LABEL: Record<AnimalState, string> = {
   sleep: 'Sleeping',
   toFence: 'Coming to see the visitors',
   greet: 'Saying hello to visitors',
+  toTree: 'Heading to a tree',
+  browse: 'Nibbling leaves',
 };
 
 /** States an animal can drop when it gets hungry or sleepy. */
-const INTERRUPTIBLE: AnimalState[] = ['idle', 'wander', 'toFence', 'greet'];
+const INTERRUPTIBLE: AnimalState[] = ['idle', 'wander', 'toFence', 'greet', 'toTree', 'browse'];
 
 const { clamp, lerp } = THREE.MathUtils;
 
@@ -71,6 +73,8 @@ export class Animal {
   private roared = false;
   /** Seconds left eating a treat from a visitor's hand. */
   private treatTime = 0;
+  /** Tree being browsed (giraffes). */
+  private tree: { x: number; z: number } | null = null;
 
   private readonly bubbleEl = document.createElement('div');
   private readonly bubble: CSS2DObject;
@@ -124,6 +128,7 @@ export class Animal {
     this.roarTime = 0;
     this.roared = false;
     this.treatTime = 0;
+    this.tree = null;
     this.state = 'sleep';
     this.stateTime = 0;
     this.moveTime = 0;
@@ -160,7 +165,11 @@ export class Animal {
       case 'wander':
       case 'toFeeder':
       case 'toFence':
+      case 'toTree':
         this.walk(dt, hour);
+        break;
+      case 'browse':
+        this.browse(dt, hour);
         break;
       case 'greet':
         this.greet(dt, hour);
@@ -245,6 +254,8 @@ export class Animal {
       this.setState('sleep');
     } else if (this.enclosure.audience > 0 && this.rng.next() < s.curiosity && this.claimFenceSpot()) {
       // Walking over to see the visitors.
+    } else if (s.browse && this.enclosure.trees.length && this.rng.chance(s.browse) && this.goToTree()) {
+      // Off to eat leaves.
     } else if (this.rng.next() < s.idleChance) {
       this.setState('idle', this.rng.float(3, 9));
     } else {
@@ -256,6 +267,33 @@ export class Animal {
   private goToFeeder(): void {
     this.feeder.approachPoint(this.radius, this.enclosure, this.rng, this.target);
     this.setState('toFeeder');
+  }
+
+  /** Pick a tree and a spot under its crown to browse from. */
+  private goToTree(): boolean {
+    const tree = this.rng.pick(this.enclosure.trees);
+    for (let i = 0; i < 8; i++) {
+      const a = this.rng.float(0, Math.PI * 2);
+      // Under the edge of the canopy, so the stretched-up head meets the leaves.
+      const x = tree.x + Math.cos(a) * 3.4;
+      const z = tree.z + Math.sin(a) * 3.4;
+      if (!this.enclosure.walkable(x, z, this.radius)) continue;
+      this.tree = tree;
+      this.target.set(x, 0, z);
+      this.setState('toTree');
+      return true;
+    }
+    return false;
+  }
+
+  /** Neck stretched up into the crown, chewing. Leaves are a light snack. */
+  private browse(dt: number, hour: number): void {
+    if (this.tree) {
+      const p = this.root.position;
+      this.yaw = lerpAngle(this.yaw, Math.atan2(this.tree.x - p.x, this.tree.z - p.z), 1 - Math.exp(-dt * 3));
+    }
+    this.hunger = Math.min(1, this.hunger + this.species.eatRate * 0.2 * dt);
+    if (this.stateTime <= 0) this.decide(hour);
   }
 
   private claimFenceSpot(): boolean {
@@ -293,7 +331,7 @@ export class Animal {
     this.state = state;
     this.stateTime = duration;
     this.moveTime = 0;
-    if (state === 'wander' || state === 'toFeeder' || state === 'toFence') {
+    if (state === 'wander' || state === 'toFeeder' || state === 'toFence' || state === 'toTree') {
       this.path = this.enclosure.findPath(this.root.position, this.target, this.radius) ?? [this.target.clone()];
     }
   }
@@ -317,6 +355,7 @@ export class Animal {
       const arrived = this.path.length <= 1;
       if (this.state === 'toFeeder' && arrived && dist < 1.5) this.setState('eat');
       else if (this.state === 'toFence' && arrived && dist < 1) this.setState('greet', this.rng.float(8, 15));
+      else if (this.state === 'toTree' && arrived && dist < 1) this.setState('browse', this.rng.float(6, 12));
       else this.setState('idle', this.rng.float(1, 4));
       return;
     }
@@ -392,7 +431,10 @@ export class Animal {
     const asleep = this.state === 'sleep';
     const eating = this.state === 'eat';
     const greeting = this.state === 'greet';
-    if (!(this.state === 'wander' || this.state === 'toFeeder' || this.state === 'toFence')) this.walking = false;
+    const browsing = this.state === 'browse';
+    if (!(this.state === 'wander' || this.state === 'toFeeder' || this.state === 'toFence' || this.state === 'toTree')) {
+      this.walking = false;
+    }
 
     this.root.rotation.y = this.yaw;
 
@@ -412,6 +454,7 @@ export class Animal {
     else if (greeting && this.roarTime > 0) pitch = -0.6 + Math.sin(this.time * 30) * 0.04; // roar: head up
     else if (greeting && this.treatTime > 0) pitch = m.eatPitch * 0.5 + Math.sin(this.time * 9) * 0.1;
     else if (greeting) pitch = 0.12 + Math.sin(this.time * 1.5) * 0.05;
+    else if (browsing) pitch = -0.4 + Math.sin(this.time * 6) * 0.06; // reaching up, chewing
     else if (asleep) pitch = 0.35;
     else if (this.walking) pitch = Math.sin(this.stride * 2) * 0.05;
     m.head.rotation.x = lerp(m.head.rotation.x, pitch, k);
@@ -427,6 +470,17 @@ export class Animal {
       seg.rotation.x = lerp(seg.rotation.x, curl, k);
       seg.rotation.z = Math.sin(this.time * 0.8 - i * 0.6) * 0.05;
     });
+    // Long necks (giraffes): base segment sets the lean, the rest add curve.
+    if (m.neck.length) {
+      let base = 0.4;
+      let rest = -0.05;
+      if (this.walking) base = 0.5 + Math.sin(this.stride) * 0.04;
+      if (eating) [base, rest] = [0.95, 0.2]; // head down to the raised rack
+      if (greeting) [base, rest] = this.treatTime > 0 ? [1.2, 0.33] : [1.1, 0.3]; // over the fence to visitors' hands
+      if (browsing) [base, rest] = [0.12, -0.1]; // up into the crown
+      if (asleep) [base, rest] = [1.15, 0.4];
+      m.neck.forEach((seg, i) => (seg.rotation.x = lerp(seg.rotation.x, i === 0 ? base : rest, k * 0.6)));
+    }
     for (const ear of m.ears) {
       ear.pivot.rotation.y = ear.rest + Math.sign(ear.rest) * Math.sin(this.time * 1.7) * 0.18;
     }

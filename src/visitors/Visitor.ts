@@ -14,7 +14,7 @@ export type Activity =
 
 type Phase = 'walking' | 'busy' | 'leaving' | 'done';
 type Gesture = 'photo' | 'point' | 'wave';
-export type Treat = 'carrot' | 'apple';
+export type Treat = 'carrot' | 'apple' | 'leaves';
 
 // Small props shared by everyone, attached to the right hand when needed.
 const propMats = {
@@ -23,6 +23,7 @@ const propMats = {
   carrot: new THREE.MeshStandardMaterial({ color: '#f28c28', roughness: 0.7 }),
   leaf: new THREE.MeshStandardMaterial({ color: '#4f9a3a', roughness: 0.8 }),
   apple: new THREE.MeshStandardMaterial({ color: '#d63a32', roughness: 0.5 }),
+  twig: new THREE.MeshStandardMaterial({ color: '#6e4b2e', roughness: 0.9 }),
 };
 const propGeo = {
   phone: new THREE.BoxGeometry(0.09, 0.16, 0.02),
@@ -30,6 +31,8 @@ const propGeo = {
   carrot: new THREE.ConeGeometry(0.045, 0.24, 8).rotateX(Math.PI / 2),
   leaf: new THREE.ConeGeometry(0.04, 0.08, 5).rotateX(-Math.PI / 2).translate(0, 0, -0.15),
   apple: new THREE.SphereGeometry(0.07, 10, 8),
+  twig: new THREE.CylinderGeometry(0.015, 0.02, 0.45, 5).rotateX(Math.PI / 2),
+  leafBlade: new THREE.SphereGeometry(0.07, 8, 6).scale(1, 0.35, 1.6),
 };
 
 const { lerp, clamp } = THREE.MathUtils;
@@ -107,9 +110,17 @@ export class Visitor {
     this.phone.add(this.flash);
     const carrot = new THREE.Group();
     carrot.add(new THREE.Mesh(propGeo.carrot, propMats.carrot), new THREE.Mesh(propGeo.leaf, propMats.leaf));
-    this.treats = { carrot, apple: new THREE.Mesh(propGeo.apple, propMats.apple) };
-    for (const p of [this.phone, this.flash, carrot, this.treats.apple]) p.visible = false;
-    this.hand.add(this.phone, carrot, this.treats.apple);
+    // A leafy acacia branch for the giraffes.
+    const leaves = new THREE.Group();
+    leaves.add(new THREE.Mesh(propGeo.twig, propMats.twig));
+    for (const [x, y, z] of [[0.05, 0.03, 0.12], [-0.05, 0.04, 0.18], [0.02, -0.03, 0.22]]) {
+      const leaf = new THREE.Mesh(propGeo.leafBlade, propMats.leaf);
+      leaf.position.set(x, y, z);
+      leaves.add(leaf);
+    }
+    this.treats = { carrot, apple: new THREE.Mesh(propGeo.apple, propMats.apple), leaves };
+    for (const p of [this.phone, this.flash, ...Object.values(this.treats)]) p.visible = false;
+    this.hand.add(this.phone, ...Object.values(this.treats));
   }
 
   /** Hold out a treat for an animal at the fence. */

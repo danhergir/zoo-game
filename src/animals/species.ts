@@ -1,6 +1,6 @@
 import type { FoodType } from '../feeder';
 
-export type SpeciesId = 'zebra' | 'elephant' | 'lion';
+export type SpeciesId = 'zebra' | 'elephant' | 'lion' | 'giraffe';
 
 export interface SpeciesDef {
   id: SpeciesId;
@@ -24,6 +24,8 @@ export interface SpeciesDef {
   idleChance: number;
   /** Chance to come to the fence and say hello when visitors are watching. */
   curiosity: number;
+  /** Chance to wander over and eat leaves from a tree when it has nothing to do. */
+  browse?: number;
   names: string[];
 }
 
@@ -57,6 +59,22 @@ export const SPECIES: Record<SpeciesId, SpeciesDef> = {
     idleChance: 0.45,
     curiosity: 0.5,
     names: ['Dumbo', 'Tembo', 'Ellie', 'Babar', 'Kibo', 'Mosi'],
+  },
+  giraffe: {
+    id: 'giraffe',
+    label: 'Giraffe',
+    food: 'hay',
+    speed: 2.0,
+    radius: 1.2,
+    hungerRate: 0.006,
+    eatRate: 0.1,
+    portion: 35,
+    tireRate: 0.003,
+    hungryAt: 0.45,
+    idleChance: 0.3,
+    curiosity: 0.5,
+    browse: 0.35,
+    names: ['Gigi', 'Stretch', 'Twiga', 'Jaffa', 'Kito', 'Zarafa', 'Masai'],
   },
   lion: {
     id: 'lion',

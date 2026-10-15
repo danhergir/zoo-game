@@ -24,7 +24,7 @@ export class Hud {
         <li><b>Right-drag</b> or <b>Q / E</b>: rotate</li>
         <li><b>Wheel</b>: zoom</li>
         <li><b>Click animal</b>: inspect</li>
-        <li><b>Click feeder</b>: refill</li>
+        <li><b>Click feeder</b>: call a keeper</li>
         <li><b>G</b>: toggle graphics quality</li>
       </ul>`;
 

@@ -12,6 +12,7 @@ import { World } from './scene';
 import { Hud, type GameState } from './ui/hud';
 import { Inspector } from './ui/inspector';
 import { Crowd } from './visitors/Crowd';
+import { Keepers } from './visitors/Keepers';
 
 const OPEN_HOUR = 9;
 const CLOSE_HOUR = 18;
@@ -33,10 +34,10 @@ const HABITATS: HabitatDef[] = [
       groundColor: '#c9b77a',
       rocks: 3,
       trees: 2,
-      keepClear: [[-15, 0, 3]],
+      keepClear: [[-12, 0, 3]],
       pond: [-32, 4, 4],
     },
-    feeder: { food: 'hay', position: [-15, 0], capacity: 120, radius: 1.3 },
+    feeder: { food: 'hay', position: [-12, 0], capacity: 120, radius: 1.3 },
     species: 'zebra',
     count: 4,
     males: 2,
@@ -48,10 +49,10 @@ const HABITATS: HabitatDef[] = [
       groundColor: '#b59a6a',
       rocks: 4,
       trees: 2,
-      keepClear: [[16, 0, 4]],
+      keepClear: [[12.6, 1, 4]],
       pond: [33, -6, 5.5],
     },
-    feeder: { food: 'hay', position: [16, 0], capacity: 150, radius: 1.8 },
+    feeder: { food: 'hay', position: [12.6, 1], capacity: 150, radius: 1.8 },
     species: 'elephant',
     count: 2,
     males: 1,
@@ -63,10 +64,10 @@ const HABITATS: HabitatDef[] = [
       groundColor: '#d0a865',
       rocks: 6,
       trees: 1,
-      keepClear: [[0, -41.5, 3]],
+      keepClear: [[0, -38.6, 3]],
       pond: [-9, -55, 3],
     },
-    feeder: { food: 'meat', position: [0, -41.5], capacity: 100, radius: 1.2 },
+    feeder: { food: 'meat', position: [0, -38.6], capacity: 100, radius: 1.2 },
     species: 'lion',
     count: 3,
     males: 1,
@@ -89,7 +90,6 @@ const animals: Animal[] = [];
 for (const h of HABITATS) {
   const enclosure = new Enclosure(h.enclosure);
   const feeder = new Feeder({ ...h.feeder, name: h.enclosure.name });
-  feeder.onEmpty = () => hud.toast(`${h.enclosure.name}: ${feeder.foodLabel.toLowerCase()} ran out!`, 'warn');
   world.scene.add(enclosure.group, feeder.root);
   enclosures.push(enclosure);
   feeders.push(feeder);
@@ -145,13 +145,17 @@ new Picker(
     if (!pick) return select(null);
     if (pick.kind === 'animal') return select(pick.animal);
     const f = pick.feeder;
-    if (f.fraction > 0.97) return hud.toast(`${f.name} feeder is already full`);
-    f.refill();
-    hud.toast(`Refilled the ${f.name} feeder`, 'good');
+    if (f.fraction > 0.97) return hud.toast(`The ${f.name} feeder is full`);
+    if (keepers.dispatch(f)) hud.toast(`A keeper is on the way to ${f.name}`, 'good');
+    else hud.toast(`A keeper is already on the way to ${f.name}`);
   },
 );
 
 const crowd = new Crowd(world.scene, { animals });
+const keepers = new Keepers(
+  world.scene,
+  feeders.map((feeder, i) => ({ feeder, enclosure: HABITATS[i].enclosure.name })),
+);
 
 /** Keep animals from standing inside each other. */
 function separate(): void {
@@ -192,6 +196,7 @@ function syncClock(): void {
 function step(dt: number): void {
   for (const a of animals) a.update(dt, state.hour);
   crowd.update(dt, state.hour);
+  keepers.update(dt);
   separate();
 }
 
@@ -242,6 +247,7 @@ if (import.meta.env.DEV) {
       animals,
       feeders,
       crowd,
+      keepers,
       world,
       rig,
       focus(name: string) {

@@ -3,7 +3,7 @@ import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { cobbleTexture, plankTexture, repeated } from './materials';
 import { mergeStatic } from './merge';
-import { BENCHES, DECKS, GATE_Z, LAMPS, PATH_RECTS, PLAZA, isPath } from './layout';
+import { BENCHES, DECKS, GATE_Z, LAMPS, PATH_RECTS, PLAZA, STAFF_HUT, isPath } from './layout';
 import { NO_AO_LAYER, PostFX } from './post';
 
 const SKY_TOP_DAY = new THREE.Color('#5aa9e6');
@@ -85,7 +85,13 @@ export class World {
     this.moon.position.set(-60, 120, -40);
     this.scene.add(this.sun, this.sun.target, this.hemi, this.moon);
 
-    this.scene.add(createGround(), mergeStatic(createPaths()), mergeStatic(createGate()), createForest());
+    this.scene.add(
+      createGround(),
+      mergeStatic(createPaths()),
+      mergeStatic(createGate()),
+      mergeStatic(createStaffHut()),
+      createForest(),
+    );
     this.addLampsAndBenches();
   }
 
@@ -402,6 +408,39 @@ function createGate(): THREE.Group {
   g.add(beam, sign);
   g.traverse((o) => (o.castShadow = true));
   g.position.set(0, 0, GATE_Z);
+  return g;
+}
+
+/** Small wooden keepers' hut; the door faces the avenue (-x). */
+function createStaffHut(): THREE.Group {
+  const g = new THREE.Group();
+  const { w, d } = STAFF_HUT;
+  const walls = new THREE.Mesh(
+    new THREE.BoxGeometry(w, 2.4, d),
+    new THREE.MeshStandardMaterial({ map: repeated(plankTexture(), 1, 1.5), color: '#c9b08a', roughness: 0.9 }),
+  );
+  walls.position.y = 1.2;
+  const roof = new THREE.Mesh(
+    new THREE.ConeGeometry(Math.hypot(w, d) / 2 + 0.4, 1.4, 4),
+    new THREE.MeshStandardMaterial({ color: '#3f6e3a', roughness: 0.8, flatShading: true }),
+  );
+  roof.position.y = 3.1;
+  roof.rotation.y = Math.PI / 4;
+  roof.scale.set(1, 1, d / w);
+  const door = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08, 1.8, 1),
+    new THREE.MeshStandardMaterial({ color: '#5a3a1e', roughness: 0.9 }),
+  );
+  door.position.set(-w / 2 - 0.03, 0.9, 0);
+  const window_ = new THREE.Mesh(
+    new THREE.BoxGeometry(0.06, 0.6, 0.8),
+    new THREE.MeshStandardMaterial({ color: '#9fd3ea', roughness: 0.2 }),
+  );
+  window_.position.set(0, 1.5, d / 2 + 0.02);
+  window_.rotation.y = Math.PI / 2;
+  for (const m of [walls, roof, door, window_]) m.castShadow = m.receiveShadow = true;
+  g.add(walls, roof, door, window_);
+  g.position.set(STAFF_HUT.x, 0, STAFF_HUT.z);
   return g;
 }
 

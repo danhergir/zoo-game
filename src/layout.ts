@@ -14,7 +14,12 @@ export interface Spot {
 export const PATH_RECTS: [number, number, number, number][] = [
   [0, 4, 9, 66], // main avenue
   [0, 34, 110, 8], // entrance boulevard
+  [7.4, 26, 5.8, 1.6], // staff path from the keeper hut to the avenue
 ];
+
+/** Keepers' hut beside the gate; they come and go through its door. */
+export const STAFF_HUT = { x: 12.6, z: 26, w: 4, d: 3.2 };
+export const STAFF_DOOR: Spot = { x: 10.2, z: 26, yaw: Math.PI / 2 };
 
 export const PLAZA = { x: 0, z: -26, r: 9 };
 
@@ -33,6 +38,8 @@ export interface Deck {
   d: number;
   /** Where visitors stand to watch, facing the enclosure. */
   spots: Spot[];
+  /** Kept free for the keeper, right in front of the feeder. */
+  feedSpot: Spot;
 }
 
 const FACE_WEST = -Math.PI / 2;
@@ -47,7 +54,8 @@ export const DECKS: Deck[] = [
     z: 0,
     w: 5.6,
     d: 5,
-    spots: [-1.7, -0.6, 0.5, 1.6].map((z) => ({ x: -9.2, z, yaw: FACE_WEST })),
+    spots: [-2, -1, 1, 2].map((z) => ({ x: -9.2, z, yaw: FACE_WEST })),
+    feedSpot: { x: -9.5, z: 0, yaw: FACE_WEST },
   },
   {
     enclosure: 'Elephant Valley',
@@ -55,7 +63,8 @@ export const DECKS: Deck[] = [
     z: 1,
     w: 5.4,
     d: 5,
-    spots: [-0.6, 0.5, 1.6, 2.7].map((z) => ({ x: 9.4, z, yaw: FACE_EAST })),
+    spots: [-1, 0, 2, 3].map((z) => ({ x: 9.4, z, yaw: FACE_EAST })),
+    feedSpot: { x: 9.7, z: 1, yaw: FACE_EAST },
   },
   {
     enclosure: 'Lion Rock',
@@ -63,7 +72,8 @@ export const DECKS: Deck[] = [
     z: -34.85,
     w: 7,
     d: 3.7,
-    spots: [-2.4, -0.8, 0.8, 2.4].map((x) => ({ x, z: -36.1, yaw: FACE_NORTH })),
+    spots: [-2.8, -1.6, 1.6, 2.8].map((x) => ({ x, z: -36.1, yaw: FACE_NORTH })),
+    feedSpot: { x: 0, z: -36.4, yaw: FACE_NORTH },
   },
 ];
 
@@ -91,7 +101,7 @@ export function isPath(x: number, z: number, margin = 0): boolean {
   for (const [cx, cz, w, d] of PATH_RECTS) {
     if (Math.abs(x - cx) < w / 2 + margin && Math.abs(z - cz) < d / 2 + margin) return true;
   }
-  for (const k of DECKS) {
+  for (const k of [...DECKS, STAFF_HUT]) {
     if (Math.abs(x - k.x) < k.w / 2 + margin && Math.abs(z - k.z) < k.d / 2 + margin) return true;
   }
   return Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.r + margin;

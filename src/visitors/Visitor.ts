@@ -1,11 +1,13 @@
 import * as THREE from 'three';
-import { BOULEVARD_Z, EXIT_X, type Spot } from '../layout';
+import type { Feeder } from '../feeder';
+import { BOULEVARD_Z, type Spot } from '../layout';
 import { buildPerson, type PersonModel } from './person';
 
 export type Activity =
   | { kind: 'view'; spot: Spot; enclosure: string }
   | { kind: 'sit'; spot: Spot }
   | { kind: 'stroll'; spot: Spot }
+  | { kind: 'feed'; spot: Spot; feeder: Feeder }
   | { kind: 'exit'; spot: Spot };
 
 type Phase = 'walking' | 'busy' | 'leaving' | 'done';
@@ -24,8 +26,9 @@ const SPINE_MIN_Z = -18;
 const SPINE_MAX_Z = 29.5;
 
 /**
- * One guest. Walks waypoint routes along the paths, then does its current
- * activity (watching, sitting, strolling) until the crowd gives it the next one.
+ * One person walking the zoo: a guest, or a keeper on a feeding run. Walks
+ * waypoint routes along the paths, then does its current activity (watching,
+ * sitting, strolling, feeding) until its manager gives it the next one.
  */
 export class Visitor {
   readonly root: THREE.Group;
@@ -52,14 +55,28 @@ export class Visitor {
   private walking = false;
   private cheer = 0;
 
-  constructor(fromRight: boolean, readonly child: boolean) {
-    this.model = buildPerson(child);
+  constructor(
+    start: Spot,
+    readonly child: boolean,
+    readonly keeper = false,
+  ) {
+    this.model = buildPerson(child, keeper);
     this.root = this.model.root;
     this.baseScale = this.root.scale.x;
     this.root.scale.setScalar(0.001);
-    const x = fromRight ? EXIT_X : -EXIT_X;
-    this.root.position.set(x, 0, BOULEVARD_Z + this.lane * 0.7);
-    this.yaw = fromRight ? -Math.PI / 2 : Math.PI / 2;
+    this.root.position.set(start.x, 0, start.z);
+    this.yaw = start.yaw;
+  }
+
+  /** Something held in front of the chest (a hay bale, a bucket); null to put it away. */
+  hold(item: THREE.Object3D | null): void {
+    this.model.carry.clear();
+    if (item) this.model.carry.add(item);
+  }
+
+  /** Remaining time on the current activity, in seconds. */
+  get timeLeft(): number {
+    return this.timer;
   }
 
   get position(): THREE.Vector3 {
@@ -148,7 +165,8 @@ export class Visitor {
     const a = this.activity;
     if (!a) return;
     this.phase = a.kind === 'exit' ? 'leaving' : 'busy';
-    this.timer = a.kind === 'view' ? randFloat(7, 13) : a.kind === 'sit' ? randFloat(10, 18) : randFloat(2, 5);
+    this.timer =
+      a.kind === 'view' ? randFloat(7, 13) : a.kind === 'sit' ? randFloat(10, 18) : a.kind === 'feed' ? 5 : randFloat(2, 5);
     this.onArrive?.(this);
   }
 
@@ -157,6 +175,8 @@ export class Visitor {
     const m = this.model;
     const k = 1 - Math.exp(-dt * 10);
     const sitting = this.phase === 'busy' && this.activity?.kind === 'sit';
+    const tossing = this.phase === 'busy' && this.activity?.kind === 'feed';
+    const carrying = m.carry.children.length > 0;
     const spot = this.activity?.spot;
     if (this.phase === 'busy' && spot) this.yaw = lerpAngle(this.yaw, spot.yaw, k);
     this.root.rotation.y = this.yaw;
@@ -172,11 +192,19 @@ export class Visitor {
       knee.rotation.x = lerp(knee.rotation.x, sitting ? 1.5 : bend, k);
     });
 
-    // Arms swing opposite the legs; raised and waving when excited.
+    // Arms swing opposite the legs; hold things in front; toss food over the fence; wave when excited.
     m.shoulders.forEach((sh, i) => {
       const side = i === 0 ? 1 : -1;
       let x = this.walking ? -(i === 0 ? swing : -swing) * 0.8 : 0;
       let z = side * 0.08;
+      if (carrying) {
+        x = -1.1;
+        z = -side * 0.12;
+      }
+      if (tossing) {
+        x = -1.5 + Math.sin(this.time * 5) * 0.7;
+        z = -side * 0.1;
+      }
       if (this.cheer > 0 && i === 0) {
         x = -2.6;
         z = side * (0.3 + Math.sin(this.time * 14) * 0.25);

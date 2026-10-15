@@ -41,6 +41,8 @@ export class Animal {
 
   private readonly model: AnimalModel;
   private readonly target = new THREE.Vector3();
+  /** Waypoints to `target` around obstacles; the last one is the target itself. */
+  private path: THREE.Vector3[] = [];
   private stateTime = randFloat(0, 3);
   private moveTime = 0;
   private yaw = Math.random() * Math.PI * 2;
@@ -191,6 +193,9 @@ export class Animal {
     this.state = state;
     this.stateTime = duration;
     this.moveTime = 0;
+    if (state === 'wander' || state === 'toFeeder') {
+      this.path = this.enclosure.findPath(this.root.position, this.target, this.radius) ?? [this.target.clone()];
+    }
   }
 
   private walk(dt: number, hour: number): void {
@@ -199,14 +204,17 @@ export class Animal {
       return;
     }
     const p = this.root.position;
-    const dx = this.target.x - p.x;
-    const dz = this.target.z - p.z;
-    const dist = Math.hypot(dx, dz);
+    // Pass intermediate waypoints loosely; only the final one needs to be hit exactly.
+    while (this.path.length > 1 && Math.hypot(this.path[0].x - p.x, this.path[0].z - p.z) < 0.7) this.path.shift();
+    const goal = this.path[0] ?? this.target;
+    const dx = goal.x - p.x;
+    const dz = goal.z - p.z;
+    const dist = this.path.length > 1 ? Math.max(1, Math.hypot(dx, dz)) : Math.hypot(dx, dz);
     this.moveTime += dt;
 
     if (dist < 0.35 || this.moveTime > 40) {
       this.walking = false;
-      if (this.state === 'toFeeder' && dist < 1.5) this.setState('eat');
+      if (this.state === 'toFeeder' && this.path.length <= 1 && dist < 1.5) this.setState('eat');
       else this.setState('idle', randFloat(1, 4));
       return;
     }

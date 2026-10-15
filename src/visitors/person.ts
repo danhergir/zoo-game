@@ -13,6 +13,8 @@ export interface PersonModel {
   /** Shoulder pivots (left, right). */
   shoulders: THREE.Group[];
   head: THREE.Group;
+  /** Empty anchor in front of the chest for carried items (added after merging). */
+  carry: THREE.Group;
   /** Height of the hip joint. */
   hipHeight: number;
   height: number;
@@ -60,14 +62,17 @@ function part(g: THREE.BufferGeometry, color: string, x = 0, y = 0, z = 0): THRE
   return m;
 }
 
-export function buildPerson(child: boolean): PersonModel {
+/** Zookeeper uniform: olive shirt, khaki trousers, wide-brim hat. */
+const KEEPER = { shirt: '#5d7a3a', pants: '#8a7550', hat: '#c9a86a' };
+
+export function buildPerson(child: boolean, keeper = false): PersonModel {
   const root = new THREE.Group();
   const pose = new THREE.Group();
   root.add(pose);
 
   const skin = pick(SKIN);
-  const shirt = pick(SHIRTS);
-  const pants = pick(PANTS);
+  const shirt = keeper ? KEEPER.shirt : pick(SHIRTS);
+  const pants = keeper ? KEEPER.pants : pick(PANTS);
   const hipHeight = 0.8;
 
   const hips: THREE.Group[] = [];
@@ -85,7 +90,7 @@ export function buildPerson(child: boolean): PersonModel {
   }
 
   pose.add(part(geo.torso, shirt, 0, 1.12, 0));
-  if (!child && Math.random() < 0.25) pose.add(part(geo.backpack, pick(HATS), 0, 1.15, -0.2));
+  if (!child && !keeper && Math.random() < 0.25) pose.add(part(geo.backpack, pick(HATS), 0, 1.15, -0.2));
 
   const shoulders: THREE.Group[] = [];
   for (const side of [1, -1]) {
@@ -100,9 +105,10 @@ export function buildPerson(child: boolean): PersonModel {
   const head = new THREE.Group();
   head.position.y = 1.5;
   head.add(part(geo.head, skin, 0, 0.14, 0));
-  const hat = Math.random();
+  const hat = keeper ? 0 : Math.random();
   if (hat < 0.25) {
-    head.add(part(geo.brim, pick(HATS), 0, 0.26, 0), part(geo.crown, pick(HATS), 0, 0.33, 0));
+    const color = keeper ? KEEPER.hat : pick(HATS);
+    head.add(part(geo.brim, color, 0, 0.26, 0), part(geo.crown, keeper ? KEEPER.hat : pick(HATS), 0, 0.33, 0));
   } else {
     const hair = part(geo.hair, pick(HAIR), 0, 0.16, -0.01);
     hair.rotation.x = -0.25;
@@ -113,5 +119,8 @@ export function buildPerson(child: boolean): PersonModel {
   const scale = child ? THREE.MathUtils.randFloat(0.58, 0.7) : THREE.MathUtils.randFloat(0.92, 1.06);
   root.scale.setScalar(scale);
   mergeRig(root);
-  return { root, pose, hips, knees, shoulders, head, hipHeight, height: 1.75 };
+  const carry = new THREE.Group();
+  carry.position.set(0, 1.0, 0.34);
+  pose.add(carry);
+  return { root, pose, hips, knees, shoulders, head, carry, hipHeight, height: 1.75 };
 }

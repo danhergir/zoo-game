@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { dirtTexture, repeated } from './materials';
 import { mergeStatic } from './merge';
+import { buildGrid, findPath, type Grid } from './pathfinding';
 
 export interface EnclosureDef {
   name: string;
@@ -45,6 +46,8 @@ export class Enclosure {
   private readonly obstacles: Obstacle[] = [];
   private readonly min = new THREE.Vector2(Infinity, Infinity);
   private readonly max = new THREE.Vector2(-Infinity, -Infinity);
+  /** Walkability grids, one per (rounded) animal size. */
+  private readonly grids = new Map<number, Grid>();
 
   constructor(def: EnclosureDef) {
     this.name = def.name;
@@ -85,6 +88,21 @@ export class Enclosure {
   walkable(x: number, z: number, radius: number): boolean {
     if (!this.containsWithMargin(x, z, radius * 0.5)) return false;
     return !this.obstacles.some((o) => o.solid && Math.hypot(o.x - x, o.z - z) < o.r + radius * 0.5);
+  }
+
+  /**
+   * Route around ponds, rocks and trees for an animal of the given radius:
+   * waypoints after `from`, ending at `to`. Null if `to` can't be reached.
+   */
+  findPath(from: THREE.Vector3, to: THREE.Vector3, radius: number): THREE.Vector3[] | null {
+    const key = Math.ceil(radius * 4) / 4;
+    let grid = this.grids.get(key);
+    if (!grid) {
+      grid = buildGrid(this.min.x, this.min.y, this.max.x, this.max.y, 0.75, (x, z) => this.walkable(x, z, key));
+      this.grids.set(key, grid);
+    }
+    const pts = findPath(grid, from.x, from.z, to.x, to.z);
+    return pts && pts.map(([x, z]) => new THREE.Vector3(x, 0, z));
   }
 
   /** The rock, tree or pond (if any) that an animal of this radius would bump into here. */

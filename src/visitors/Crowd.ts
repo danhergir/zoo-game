@@ -60,7 +60,13 @@ export class Crowd {
   }
 
   private spawn(): void {
-    const v = new Visitor(Math.random() < 0.5, Math.random() < 0.25);
+    const fromRight = Math.random() < 0.5;
+    const start = {
+      x: fromRight ? EXIT_X : -EXIT_X,
+      z: BOULEVARD_Z + THREE.MathUtils.randFloat(-1.8, 1.8),
+      yaw: fromRight ? -Math.PI / 2 : Math.PI / 2,
+    };
+    const v = new Visitor(start, Math.random() < 0.25);
     v.onArrive = () => this.react(v);
     this.scene.add(v.root);
     this.visitors.push(v);

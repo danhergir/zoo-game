@@ -12,7 +12,6 @@ export interface FeederDef {
   radius: number;
 }
 
-const FOOD_LABEL: Record<FoodType, string> = { hay: 'Hay', meat: 'Meat' };
 
 /** A round food tub. Animals walk up to it and eat from its stock. */
 export class Feeder {
@@ -22,7 +21,6 @@ export class Feeder {
   readonly radius: number;
   readonly root = new THREE.Group();
   stock: number;
-  onEmpty: (() => void) | null = null;
 
   private readonly foodMesh: THREE.Group;
 
@@ -100,19 +98,11 @@ export class Feeder {
     return this.stock > 0.5;
   }
 
-  get foodLabel(): string {
-    return FOOD_LABEL[this.food];
-  }
-
   /** Takes up to `amount` food and returns how much was actually taken. */
   consume(amount: number): number {
     const taken = Math.min(amount, this.stock);
-    const wasFull = this.hasFood;
     this.stock -= taken;
-    if (wasFull && !this.hasFood) {
-      this.stock = 0;
-      this.onEmpty?.();
-    }
+    if (!this.hasFood) this.stock = 0;
     return taken;
   }
 

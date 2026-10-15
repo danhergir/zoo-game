@@ -40,6 +40,10 @@ export interface Deck {
   spots: Spot[];
   /** Kept free for the keeper, right in front of the feeder. */
   feedSpot: Spot;
+  /** Just inside the fence, facing the deck: where curious animals come to say hello. */
+  animalSpots: Spot[];
+  /** Treats visitors can hand over here, or null if animals here aren't fed by hand. */
+  treat: 'carrot' | 'apple' | null;
 }
 
 const FACE_WEST = -Math.PI / 2;
@@ -56,6 +60,8 @@ export const DECKS: Deck[] = [
     d: 5,
     spots: [-2, -1, 1, 2].map((z) => ({ x: -9.2, z, yaw: FACE_WEST })),
     feedSpot: { x: -9.5, z: 0, yaw: FACE_WEST },
+    animalSpots: [-3.2, 3.2].map((z) => ({ x: -11.6, z, yaw: FACE_EAST })),
+    treat: 'carrot',
   },
   {
     enclosure: 'Elephant Valley',
@@ -65,6 +71,8 @@ export const DECKS: Deck[] = [
     d: 5,
     spots: [-1, 0, 2, 3].map((z) => ({ x: 9.4, z, yaw: FACE_EAST })),
     feedSpot: { x: 9.7, z: 1, yaw: FACE_EAST },
+    animalSpots: [-3, 5].map((z) => ({ x: 12.2, z, yaw: FACE_WEST })),
+    treat: 'apple',
   },
   {
     enclosure: 'Lion Rock',
@@ -74,6 +82,8 @@ export const DECKS: Deck[] = [
     d: 3.7,
     spots: [-2.8, -1.6, 1.6, 2.8].map((x) => ({ x, z: -36.1, yaw: FACE_NORTH })),
     feedSpot: { x: 0, z: -36.4, yaw: FACE_NORTH },
+    animalSpots: [-3.4, 3.4].map((x) => ({ x, z: -38.4, yaw: 0 })),
+    treat: null,
   },
 ];
 

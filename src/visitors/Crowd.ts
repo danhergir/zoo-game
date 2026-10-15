@@ -3,6 +3,9 @@ import type { Animal } from '../animals/Animal';
 import { BOULEVARD_Z, DECKS, EXIT_X, PLAZA, SEATS, type Spot } from '../layout';
 import { Visitor, type Activity } from './Visitor';
 
+/** Seconds a visitor holds out a treat before the animal takes it. */
+const TREAT_REACH = 1.2;
+
 const MAX_VISITORS = 36;
 /** Guests arrive while the zoo is open, until shortly before closing. */
 const ARRIVE_FROM = 9;
@@ -11,12 +14,21 @@ const CLOSE_HOUR = 18;
 
 export interface CrowdHooks {
   animals: Animal[];
+  /** Is a keeper feeding at this enclosure right now? Feeding time draws a crowd. */
+  feedingAt: (enclosure: string) => boolean;
+}
+
+interface TreatOffer {
+  visitor: Visitor;
+  animal: Animal;
+  time: number;
 }
 
 /** Spawns guests, hands them things to do, and sends them home at closing. */
 export class Crowd {
   readonly visitors: Visitor[] = [];
   private readonly taken = new Set<Spot>();
+  private readonly offers: TreatOffer[] = [];
   private spawnTimer = 0;
 
   constructor(
@@ -50,6 +62,8 @@ export class Crowd {
         this.next(v);
       }
     }
+
+    this.interact(dt);
 
     for (let i = this.visitors.length - 1; i >= 0; i--) {
       const v = this.visitors[i];
@@ -98,11 +112,75 @@ export class Crowd {
     if (visible.length > 0 && mood > 0.75) v.celebrate();
   }
 
+  /** Visitors on the decks and the animals at the fence, reacting to each other. */
+  private interact(dt: number): void {
+    const animals = this.hooks.animals;
+    const watching = (v: Visitor, enclosure: string) =>
+      v.phase === 'busy' && v.activity?.kind === 'view' && v.activity.enclosure === enclosure;
+
+    // How many people each enclosure has watching; curious animals come over when it's > 0.
+    for (const a of animals) a.enclosure.audience = 0;
+    for (const v of this.visitors) {
+      const a = v.activity;
+      if (a?.kind !== 'view' || v.phase !== 'busy') continue;
+      const e = animals.find((x) => x.enclosure.name === a.enclosure)?.enclosure;
+      if (e) e.audience++;
+    }
+
+    // A roar makes everyone on that deck jump back.
+    for (const lion of animals) {
+      if (!lion.consumeRoar()) continue;
+      for (const v of this.visitors) {
+        if (watching(v, lion.enclosure.name) && v.position.distanceTo(lion.position) < 12) v.startle();
+      }
+    }
+
+    // Treats: a visitor holds one out, and an animal at the fence takes it.
+    for (let i = this.offers.length - 1; i >= 0; i--) {
+      const o = this.offers[i];
+      o.time += dt;
+      const stillThere = watching(o.visitor, o.animal.enclosure.name) && o.animal.state === 'greet';
+      if (!stillThere || !o.visitor.offeringTreat) {
+        o.visitor.endTreat();
+        this.offers.splice(i, 1);
+      } else if (o.time >= TREAT_REACH) {
+        o.animal.takeTreat();
+        o.visitor.endTreat();
+        this.offers.splice(i, 1);
+      }
+    }
+    for (const deck of DECKS) {
+      if (!deck.treat) continue;
+      const greeters = animals.filter((x) => x.enclosure.name === deck.enclosure && x.state === 'greet');
+      for (const animal of greeters) {
+        if (this.offers.some((o) => o.animal === animal) || Math.random() > dt * 0.4) continue;
+        const near = this.visitors.filter(
+          (v) => watching(v, deck.enclosure) && !v.offeringTreat && v.position.distanceTo(animal.position) < 7,
+        );
+        if (!near.length) continue;
+        const visitor = near[Math.floor(Math.random() * near.length)];
+        visitor.offerTreat(deck.treat);
+        this.offers.push({ visitor, animal, time: 0 });
+      }
+    }
+  }
+
+  /** Pick a free deck spot, favoring decks where something is happening (feeding, animals at the fence). */
   private viewActivity(): Activity | null {
-    const options = DECKS.flatMap((d) =>
-      d.spots.filter((s) => !this.taken.has(s)).map((spot) => ({ kind: 'view' as const, spot, enclosure: d.enclosure })),
-    );
-    return options.length ? options[Math.floor(Math.random() * options.length)] : null;
+    const options: { activity: Activity; weight: number }[] = [];
+    for (const d of DECKS) {
+      const greeting = this.hooks.animals.filter((x) => x.enclosure.name === d.enclosure && x.state === 'greet').length;
+      const weight = 1 + (this.hooks.feedingAt(d.enclosure) ? 4 : 0) + greeting * 2;
+      for (const spot of d.spots) {
+        if (!this.taken.has(spot)) options.push({ activity: { kind: 'view', spot, enclosure: d.enclosure }, weight });
+      }
+    }
+    let r = Math.random() * options.reduce((s, o) => s + o.weight, 0);
+    for (const o of options) {
+      r -= o.weight;
+      if (r <= 0) return o.activity;
+    }
+    return null;
   }
 
   private sitActivity(): Activity | null {

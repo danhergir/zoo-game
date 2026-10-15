@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Spot } from './layout';
 import { dirtTexture, repeated } from './materials';
 import { mergeStatic } from './merge';
 import { buildGrid, findPath, type Grid } from './pathfinding';
@@ -46,6 +47,12 @@ export class Enclosure {
   private readonly obstacles: Obstacle[] = [];
   private readonly min = new THREE.Vector2(Infinity, Infinity);
   private readonly max = new THREE.Vector2(-Infinity, -Infinity);
+  /** How many visitors are watching from this enclosure's deck right now. */
+  audience = 0;
+  /** Spots just inside the fence, facing the deck, where animals come to say hello. */
+  animalSpots: Spot[] = [];
+  /** Animal spots currently claimed. */
+  readonly takenSpots = new Set<Spot>();
   /** Walkability grids, one per (rounded) animal size. */
   private readonly grids = new Map<number, Grid>();
 

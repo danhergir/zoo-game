@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import type { Enclosure } from '../enclosure';
 import type { Feeder } from '../feeder';
+import type { Spot } from '../layout';
 import { buildModel, type AnimalModel } from './models';
 import type { SpeciesDef } from './species';
 
-export type AnimalState = 'idle' | 'wander' | 'toFeeder' | 'eat' | 'sleep';
+export type AnimalState = 'idle' | 'wander' | 'toFeeder' | 'eat' | 'sleep' | 'toFence' | 'greet';
 
 const STATE_LABEL: Record<AnimalState, string> = {
   idle: 'Relaxing',
@@ -13,7 +14,12 @@ const STATE_LABEL: Record<AnimalState, string> = {
   toFeeder: 'Heading to food',
   eat: 'Eating',
   sleep: 'Sleeping',
+  toFence: 'Coming to see the visitors',
+  greet: 'Saying hello to visitors',
 };
+
+/** States an animal can drop when it gets hungry or sleepy. */
+const INTERRUPTIBLE: AnimalState[] = ['idle', 'wander', 'toFence', 'greet'];
 
 const { clamp, randFloat, lerp } = THREE.MathUtils;
 
@@ -54,6 +60,14 @@ export class Animal {
   // Each animal keeps its own schedule so they don't all drop at once.
   private readonly bedtime = randFloat(19.5, 21);
   private readonly wakeTime = randFloat(5.5, 7.5);
+  /** Fence spot claimed while coming over to say hello. */
+  private fenceSpot: Spot | null = null;
+  /** Seconds until a greeting lion roars (Infinity = not this time). */
+  private roarIn = Infinity;
+  private roarTime = 0;
+  private roared = false;
+  /** Seconds left eating a treat from a visitor's hand. */
+  private treatTime = 0;
 
   private readonly bubbleEl = document.createElement('div');
   private readonly bubble: CSS2DObject;
@@ -112,7 +126,11 @@ export class Animal {
         break;
       case 'wander':
       case 'toFeeder':
+      case 'toFence':
         this.walk(dt, hour);
+        break;
+      case 'greet':
+        this.greet(dt, hour);
         break;
       case 'eat':
         this.eat(dt);
@@ -123,6 +141,22 @@ export class Animal {
 
     this.animate(dt);
     this.updateBubble();
+  }
+
+  /** Take a treat from a visitor's hand, if saying hello at the fence. */
+  takeTreat(): boolean {
+    if (this.state !== 'greet' || this.treatTime > 0) return false;
+    this.treatTime = 1.6;
+    this.hunger = Math.min(1, this.hunger + 0.04);
+    this.happiness = Math.min(1, this.happiness + 0.02);
+    return true;
+  }
+
+  /** True once per roar, so visitors can react to it. */
+  consumeRoar(): boolean {
+    const r = this.roared;
+    this.roared = false;
+    return r;
   }
 
   /** Called by the separation pass; keeps the animal inside its fence. */
@@ -159,11 +193,11 @@ export class Animal {
       if (rested || starving) this.decide(hour);
       return;
     }
-    if ((s === 'idle' || s === 'wander') && this.hunger < this.species.hungryAt && this.feeder.hasFood) {
+    if (INTERRUPTIBLE.includes(s) && this.hunger < this.species.hungryAt && this.feeder.hasFood) {
       this.goToFeeder();
       return;
     }
-    if ((s === 'idle' || s === 'wander') && this.isBedtime(hour) && this.hunger > 0.25) {
+    if (INTERRUPTIBLE.includes(s) && this.isBedtime(hour) && this.hunger > 0.25) {
       this.setState('sleep');
     }
   }
@@ -176,6 +210,8 @@ export class Animal {
       this.setState('sleep');
     } else if (this.energy < 0.15) {
       this.setState('sleep');
+    } else if (this.enclosure.audience > 0 && Math.random() < s.curiosity && this.claimFenceSpot()) {
+      // Walking over to see the visitors.
     } else if (Math.random() < s.idleChance) {
       this.setState('idle', randFloat(3, 9));
     } else {
@@ -189,11 +225,42 @@ export class Animal {
     this.setState('toFeeder');
   }
 
+  private claimFenceSpot(): boolean {
+    const e = this.enclosure;
+    const free = e.animalSpots.filter((sp) => !e.takenSpots.has(sp));
+    if (!free.length) return false;
+    const spot = free[Math.floor(Math.random() * free.length)];
+    e.takenSpots.add(spot);
+    this.fenceSpot = spot;
+    this.target.set(spot.x, 0, spot.z);
+    this.setState('toFence');
+    return true;
+  }
+
+  /** At the fence, facing the visitors. Lions sometimes roar. */
+  private greet(dt: number, hour: number): void {
+    if (this.fenceSpot) this.yaw = lerpAngle(this.yaw, this.fenceSpot.yaw, 1 - Math.exp(-dt * 3));
+    this.treatTime = Math.max(0, this.treatTime - dt);
+    this.roarTime = Math.max(0, this.roarTime - dt);
+    this.roarIn -= dt;
+    if (this.roarIn <= 0) {
+      this.roarIn = Infinity;
+      this.roarTime = 1.4;
+      this.roared = true;
+    }
+    if (this.stateTime <= 0 && this.treatTime <= 0) this.decide(hour);
+  }
+
   private setState(state: AnimalState, duration = 0): void {
+    if (this.fenceSpot && state !== 'greet' && state !== 'toFence') {
+      this.enclosure.takenSpots.delete(this.fenceSpot);
+      this.fenceSpot = null;
+    }
+    if (state === 'greet') this.roarIn = this.species.id === 'lion' && Math.random() < 0.6 ? randFloat(2, 6) : Infinity;
     this.state = state;
     this.stateTime = duration;
     this.moveTime = 0;
-    if (state === 'wander' || state === 'toFeeder') {
+    if (state === 'wander' || state === 'toFeeder' || state === 'toFence') {
       this.path = this.enclosure.findPath(this.root.position, this.target, this.radius) ?? [this.target.clone()];
     }
   }
@@ -214,7 +281,9 @@ export class Animal {
 
     if (dist < 0.35 || this.moveTime > 40) {
       this.walking = false;
-      if (this.state === 'toFeeder' && this.path.length <= 1 && dist < 1.5) this.setState('eat');
+      const arrived = this.path.length <= 1;
+      if (this.state === 'toFeeder' && arrived && dist < 1.5) this.setState('eat');
+      else if (this.state === 'toFence' && arrived && dist < 1) this.setState('greet', randFloat(8, 15));
       else this.setState('idle', randFloat(1, 4));
       return;
     }
@@ -289,7 +358,8 @@ export class Animal {
     const L = m.legLength;
     const asleep = this.state === 'sleep';
     const eating = this.state === 'eat';
-    if (!(this.state === 'wander' || this.state === 'toFeeder')) this.walking = false;
+    const greeting = this.state === 'greet';
+    if (!(this.state === 'wander' || this.state === 'toFeeder' || this.state === 'toFence')) this.walking = false;
 
     this.root.rotation.y = this.yaw;
 
@@ -321,17 +391,21 @@ export class Animal {
     }
     let pitch = 0;
     if (eating) pitch = m.eatPitch + Math.sin(this.time * 7) * 0.08;
+    else if (greeting && this.roarTime > 0) pitch = -0.6 + Math.sin(this.time * 30) * 0.04; // roar: head up
+    else if (greeting && this.treatTime > 0) pitch = m.eatPitch * 0.5 + Math.sin(this.time * 9) * 0.1;
+    else if (greeting) pitch = 0.12 + Math.sin(this.time * 1.5) * 0.05;
     else if (asleep) pitch = 0.35;
     else if (this.walking) pitch = Math.sin(this.stride * 2) * 0.05;
     m.head.rotation.x = lerp(m.head.rotation.x, pitch, k);
     m.head.rotation.y = lerp(m.head.rotation.y, asleep || eating ? 0 : this.lookYaw, k * 0.5);
 
     if (m.tail) m.tail.rotation.z = Math.sin(this.time * (asleep ? 0.8 : 2.2)) * (asleep ? 0.05 : 0.3);
-    // Trunk sways; while eating it reaches forward and curls back to the mouth.
+    // Trunk sways; reaches out over the fence to visitors; curls back to the mouth to eat.
     m.trunk.forEach((seg, i) => {
-      const curl = eating
-        ? 0.12 + Math.sin(this.time * 2.2 - i * 0.4) * 0.28
-        : -0.04 + Math.sin(this.time * 1.1 - i * 0.5) * 0.07;
+      let curl = -0.04 + Math.sin(this.time * 1.1 - i * 0.5) * 0.07;
+      if (eating) curl = 0.12 + Math.sin(this.time * 2.2 - i * 0.4) * 0.28;
+      else if (greeting && this.treatTime > 0) curl = 0.38;
+      else if (greeting) curl = -0.3 + Math.sin(this.time * 1.6 - i * 0.5) * 0.08;
       seg.rotation.x = lerp(seg.rotation.x, curl, k);
       seg.rotation.z = Math.sin(this.time * 0.8 - i * 0.6) * 0.05;
     });

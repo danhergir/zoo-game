@@ -11,6 +11,24 @@ export type Activity =
   | { kind: 'exit'; spot: Spot };
 
 type Phase = 'walking' | 'busy' | 'leaving' | 'done';
+type Gesture = 'photo' | 'point' | 'wave';
+export type Treat = 'carrot' | 'apple';
+
+// Small props shared by everyone, attached to the right hand when needed.
+const propMats = {
+  phone: new THREE.MeshStandardMaterial({ color: '#22252b', roughness: 0.4 }),
+  flash: new THREE.MeshBasicMaterial({ color: '#ffffff' }),
+  carrot: new THREE.MeshStandardMaterial({ color: '#f28c28', roughness: 0.7 }),
+  leaf: new THREE.MeshStandardMaterial({ color: '#4f9a3a', roughness: 0.8 }),
+  apple: new THREE.MeshStandardMaterial({ color: '#d63a32', roughness: 0.5 }),
+};
+const propGeo = {
+  phone: new THREE.BoxGeometry(0.09, 0.16, 0.02),
+  flash: new THREE.SphereGeometry(0.06, 8, 6),
+  carrot: new THREE.ConeGeometry(0.045, 0.24, 8).rotateX(Math.PI / 2),
+  leaf: new THREE.ConeGeometry(0.04, 0.08, 5).rotateX(-Math.PI / 2).translate(0, 0, -0.15),
+  apple: new THREE.SphereGeometry(0.07, 10, 8),
+};
 
 const { lerp, randFloat, clamp } = THREE.MathUtils;
 
@@ -54,6 +72,15 @@ export class Visitor {
   private time = Math.random() * 10;
   private walking = false;
   private cheer = 0;
+  private gesture: Gesture | null = null;
+  private gestureTime = 0;
+  private nextGesture = randFloat(1, 3);
+  private startleTime = 0;
+  private offering: Treat | null = null;
+  private readonly hand = new THREE.Group();
+  private readonly phone = new THREE.Mesh(propGeo.phone, propMats.phone);
+  private readonly flash = new THREE.Mesh(propGeo.flash, propMats.flash);
+  private readonly treats: Record<Treat, THREE.Object3D>;
 
   constructor(
     start: Spot,
@@ -66,6 +93,41 @@ export class Visitor {
     this.root.scale.setScalar(0.001);
     this.root.position.set(start.x, 0, start.z);
     this.yaw = start.yaw;
+
+    // Props live at the right hand and are toggled on and off.
+    this.hand.position.set(0, -0.47, 0.07);
+    this.model.shoulders[0].add(this.hand);
+    this.flash.position.set(0, 0.05, 0.03);
+    this.phone.add(this.flash);
+    const carrot = new THREE.Group();
+    carrot.add(new THREE.Mesh(propGeo.carrot, propMats.carrot), new THREE.Mesh(propGeo.leaf, propMats.leaf));
+    this.treats = { carrot, apple: new THREE.Mesh(propGeo.apple, propMats.apple) };
+    for (const p of [this.phone, this.flash, carrot, this.treats.apple]) p.visible = false;
+    this.hand.add(this.phone, carrot, this.treats.apple);
+  }
+
+  /** Hold out a treat for an animal at the fence. */
+  offerTreat(treat: Treat): void {
+    this.offering = treat;
+    this.gesture = null;
+    this.treats[treat].visible = true;
+  }
+
+  /** The animal took it (or gave up): put the hand down. */
+  endTreat(): void {
+    if (this.offering) this.treats[this.offering].visible = false;
+    this.offering = null;
+    this.nextGesture = randFloat(1, 3);
+  }
+
+  get offeringTreat(): boolean {
+    return this.offering !== null;
+  }
+
+  /** Jump back with hands up, e.g. when a lion roars. */
+  startle(): void {
+    this.startleTime = 0.9;
+    this.endTreat();
   }
 
   /** Something held in front of the chest (a hay bale, a bucket); null to put it away. */
@@ -111,6 +173,8 @@ export class Visitor {
     if (leaving && this.appear === 0) this.phase = 'done';
 
     this.cheer = Math.max(0, this.cheer - dt);
+    this.startleTime = Math.max(0, this.startleTime - dt);
+    this.updateGesture(dt);
     this.animate(dt);
   }
 
@@ -171,6 +235,29 @@ export class Visitor {
   }
 
 
+  /** While watching animals: take photos, point and wave now and then. */
+  private updateGesture(dt: number): void {
+    const watching = this.phase === 'busy' && this.activity?.kind === 'view';
+    if (this.gesture) {
+      this.gestureTime -= dt;
+      // The camera flash fires once, partway through a photo.
+      this.flash.visible = this.gesture === 'photo' && this.gestureTime > 0.9 && this.gestureTime < 1.05;
+      if (this.gestureTime <= 0 || !watching) {
+        this.gesture = null;
+        this.phone.visible = this.flash.visible = false;
+        this.nextGesture = randFloat(2, 5);
+      }
+      return;
+    }
+    if (!watching || this.offering || this.startleTime > 0) return;
+    this.nextGesture -= dt;
+    if (this.nextGesture > 0) return;
+    const r = Math.random();
+    this.gesture = r < 0.45 ? 'photo' : r < 0.75 ? 'point' : 'wave';
+    this.gestureTime = this.gesture === 'photo' ? 2.2 : 1.8;
+    this.phone.visible = this.gesture === 'photo';
+  }
+
   private animate(dt: number): void {
     const m = this.model;
     const k = 1 - Math.exp(-dt * 10);
@@ -205,9 +292,26 @@ export class Visitor {
         x = -1.5 + Math.sin(this.time * 5) * 0.7;
         z = -side * 0.1;
       }
-      if (this.cheer > 0 && i === 0) {
+      if (i === 0) {
+        if (this.gesture === 'photo') {
+          x = -1.95; // phone up at eye level
+          z = -0.25;
+        } else if (this.gesture === 'point') {
+          x = -1.6;
+          z = 0.05;
+        }
+        if (this.offering) {
+          x = -1.45; // arm straight out over the fence
+          z = 0;
+        }
+      }
+      if ((this.cheer > 0 || this.gesture === 'wave') && i === 0) {
         x = -2.6;
         z = side * (0.3 + Math.sin(this.time * 14) * 0.25);
+      }
+      if (this.startleTime > 0) {
+        x = -2.4;
+        z = side * 0.5;
       }
       if (sitting) x = -0.35;
       sh.rotation.x = lerp(sh.rotation.x, x, k);
@@ -218,9 +322,9 @@ export class Visitor {
     const s = this.baseScale;
     const sitDrop = (0.61 - m.hipHeight * s) / s;
     const bob = this.walking ? Math.abs(Math.sin(this.stride)) * 0.04 : 0;
-    const hop = this.cheer > 0 ? Math.abs(Math.sin(this.time * 9)) * 0.12 : 0;
+    const hop = this.cheer > 0 ? Math.abs(Math.sin(this.time * 9)) * 0.12 : this.startleTime > 0.5 ? 0.15 : 0;
     m.pose.position.y = lerp(m.pose.position.y, sitting ? sitDrop : bob + hop, k);
-    m.pose.position.z = lerp(m.pose.position.z, sitting ? -0.12 : 0, k);
+    m.pose.position.z = lerp(m.pose.position.z, sitting ? -0.12 : this.startleTime > 0 ? -0.45 : 0, k);
 
     m.head.rotation.y = this.phase === 'busy' && !sitting ? Math.sin(this.time * 0.7) * 0.35 : 0;
   }

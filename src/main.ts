@@ -6,7 +6,7 @@ import { CameraRig } from './camera';
 import { zooTime } from './clock';
 import { Enclosure, type EnclosureDef } from './enclosure';
 import { Feeder, type FeederDef } from './feeder';
-import { isPath } from './layout';
+import { DECKS, isPath } from './layout';
 import { Picker } from './picking';
 import { World } from './scene';
 import { Hud, type GameState } from './ui/hud';
@@ -151,11 +151,12 @@ new Picker(
   },
 );
 
-const crowd = new Crowd(world.scene, { animals });
 const keepers = new Keepers(
   world.scene,
   feeders.map((feeder, i) => ({ feeder, enclosure: HABITATS[i].enclosure.name })),
 );
+const crowd = new Crowd(world.scene, { animals, feedingAt: (name) => keepers.feedingAt(name) !== null });
+for (const e of enclosures) e.animalSpots = DECKS.find((d) => d.enclosure === e.name)?.animalSpots ?? [];
 
 /** Keep animals from standing inside each other. */
 function separate(): void {

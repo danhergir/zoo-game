@@ -22,6 +22,8 @@ export interface SpeciesDef {
   hungryAt: number;
   /** Chance to idle instead of wandering when it has nothing to do. */
   idleChance: number;
+  /** Chance to come to the fence and say hello when visitors are watching. */
+  curiosity: number;
   names: string[];
 }
 
@@ -38,6 +40,7 @@ export const SPECIES: Record<SpeciesId, SpeciesDef> = {
     tireRate: 0.004,
     hungryAt: 0.45,
     idleChance: 0.4,
+    curiosity: 0.4,
     names: ['Ziggy', 'Marty', 'Stripe', 'Zuri', 'Domino', 'Pepper', 'Ozzy', 'Nala'],
   },
   elephant: {
@@ -52,6 +55,7 @@ export const SPECIES: Record<SpeciesId, SpeciesDef> = {
     tireRate: 0.003,
     hungryAt: 0.5,
     idleChance: 0.45,
+    curiosity: 0.5,
     names: ['Dumbo', 'Tembo', 'Ellie', 'Babar', 'Kibo', 'Mosi'],
   },
   lion: {
@@ -66,6 +70,7 @@ export const SPECIES: Record<SpeciesId, SpeciesDef> = {
     tireRate: 0.006,
     hungryAt: 0.4,
     idleChance: 0.7,
+    curiosity: 0.3,
     names: ['Simba', 'Leo', 'Kiara', 'Sarabi', 'Aslan', 'Zira', 'Kovu'],
   },
 };

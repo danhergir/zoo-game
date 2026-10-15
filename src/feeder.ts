@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Enclosure } from './enclosure';
+import type { Rng } from './rng';
 import { mergeChildren } from './merge';
 
 export type FoodType = 'hay' | 'meat';
@@ -112,11 +113,11 @@ export class Feeder {
   }
 
   /** A spot next to the tub, inside the enclosure, for an animal of the given radius. */
-  approachPoint(animalRadius: number, enclosure: Enclosure, out = new THREE.Vector3()): THREE.Vector3 {
+  approachPoint(animalRadius: number, enclosure: Enclosure, rng: Rng, out = new THREE.Vector3()): THREE.Vector3 {
     const d = this.radius + animalRadius + 0.2;
     const c = this.root.position;
     for (let i = 0; i < 30; i++) {
-      const a = Math.random() * Math.PI * 2;
+      const a = rng.next() * Math.PI * 2;
       const x = c.x + Math.cos(a) * d;
       const z = c.z + Math.sin(a) * d;
       if (enclosure.containsWithMargin(x, z, animalRadius * 0.6)) return out.set(x, 0, z);

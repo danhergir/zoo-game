@@ -3,6 +3,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import type { Enclosure } from '../enclosure';
 import type { Feeder } from '../feeder';
 import type { Spot } from '../layout';
+import type { Rng } from '../rng';
 import { buildModel, poseLegs, type AnimalModel } from './models';
 import type { SpeciesDef } from './species';
 
@@ -21,7 +22,7 @@ const STATE_LABEL: Record<AnimalState, string> = {
 /** States an animal can drop when it gets hungry or sleepy. */
 const INTERRUPTIBLE: AnimalState[] = ['idle', 'wander', 'toFence', 'greet'];
 
-const { clamp, randFloat, lerp } = THREE.MathUtils;
+const { clamp, lerp } = THREE.MathUtils;
 
 function lerpAngle(a: number, b: number, t: number): number {
   let d = (b - a) % (Math.PI * 2);
@@ -40,26 +41,28 @@ export class Animal {
   readonly radius: number;
 
   /** 1 = full, 0 = starving. */
-  hunger = randFloat(0.55, 1);
-  energy = randFloat(0.7, 1);
-  happiness = 0.75;
-  state: AnimalState = 'idle';
+  hunger = 1;
+  energy = 1;
+  happiness = 0.8;
+  state: AnimalState = 'sleep';
+  /** All of this animal's random choices come from here (see reset). */
+  private rng: Rng;
 
   private readonly model: AnimalModel;
   private readonly target = new THREE.Vector3();
   /** Waypoints to `target` around obstacles; the last one is the target itself. */
   private path: THREE.Vector3[] = [];
-  private stateTime = randFloat(0, 3);
+  private stateTime = 0;
   private moveTime = 0;
-  private yaw = Math.random() * Math.PI * 2;
+  private yaw = 0;
   private stride = 0;
-  private time = Math.random() * 100;
+  private time = 0;
   private walking = false;
   private lookYaw = 0;
   private lookTimer = 0;
   // Each animal keeps its own schedule so they don't all drop at once.
-  private readonly bedtime = randFloat(19.5, 21);
-  private readonly wakeTime = randFloat(5.5, 7.5);
+  private bedtime = 20;
+  private wakeTime = 6.5;
   /** Fence spot claimed while coming over to say hello. */
   private fenceSpot: Spot | null = null;
   /** Seconds until a greeting lion roars (Infinity = not this time). */
@@ -73,7 +76,9 @@ export class Animal {
   private readonly bubble: CSS2DObject;
   private bubbleText = '';
 
-  constructor(species: SpeciesDef, name: string, male: boolean, enclosure: Enclosure, feeder: Feeder) {
+  /** `rng` sets this animal's size; seed it the same everywhere. */
+  constructor(species: SpeciesDef, name: string, male: boolean, enclosure: Enclosure, feeder: Feeder, rng: Rng) {
+    this.rng = rng;
     this.species = species;
     this.name = name;
     this.male = male;
@@ -82,11 +87,9 @@ export class Animal {
 
     this.model = buildModel(species.id, male);
     this.root = this.model.root;
-    const scale = randFloat(0.88, 1.08);
+    const scale = rng.float(0.88, 1.08);
     this.root.scale.setScalar(scale);
     this.radius = species.radius * scale;
-    enclosure.randomPoint(species.radius + 1, this.root.position);
-    this.root.rotation.y = this.yaw;
     this.root.userData.pick = { kind: 'animal', animal: this };
 
     this.bubbleEl.className = 'bubble';
@@ -94,6 +97,36 @@ export class Animal {
     this.bubble.visible = false;
     this.bubble.position.y = this.model.height + 0.5;
     this.root.add(this.bubble);
+  }
+
+  /**
+   * Start of a zoo day (the nightly reset): asleep at a seeded spot with fresh
+   * needs. Every browser resets with the same rng, so everyone's zoo matches.
+   */
+  reset(rng: Rng): void {
+    this.rng = rng;
+    this.hunger = rng.float(0.7, 1);
+    this.energy = rng.float(0.6, 0.9);
+    this.happiness = 0.8;
+    this.bedtime = rng.float(19.5, 21);
+    this.wakeTime = rng.float(5.5, 7.5);
+    this.enclosure.randomPoint(this.radius + 1, rng, this.root.position);
+    this.yaw = rng.float(0, Math.PI * 2);
+    this.root.rotation.y = this.yaw;
+    this.time = rng.float(0, 100);
+    this.stride = 0;
+    this.walking = false;
+    this.lookYaw = 0;
+    this.lookTimer = 0;
+    this.path = [];
+    this.fenceSpot = null;
+    this.roarIn = Infinity;
+    this.roarTime = 0;
+    this.roared = false;
+    this.treatTime = 0;
+    this.state = 'sleep';
+    this.stateTime = 0;
+    this.moveTime = 0;
   }
 
   get position(): THREE.Vector3 {
@@ -210,18 +243,18 @@ export class Animal {
       this.setState('sleep');
     } else if (this.energy < 0.15) {
       this.setState('sleep');
-    } else if (this.enclosure.audience > 0 && Math.random() < s.curiosity && this.claimFenceSpot()) {
+    } else if (this.enclosure.audience > 0 && this.rng.next() < s.curiosity && this.claimFenceSpot()) {
       // Walking over to see the visitors.
-    } else if (Math.random() < s.idleChance) {
-      this.setState('idle', randFloat(3, 9));
+    } else if (this.rng.next() < s.idleChance) {
+      this.setState('idle', this.rng.float(3, 9));
     } else {
-      this.enclosure.randomPoint(this.radius + 0.5, this.target);
+      this.enclosure.randomPoint(this.radius + 0.5, this.rng, this.target);
       this.setState('wander');
     }
   }
 
   private goToFeeder(): void {
-    this.feeder.approachPoint(this.radius, this.enclosure, this.target);
+    this.feeder.approachPoint(this.radius, this.enclosure, this.rng, this.target);
     this.setState('toFeeder');
   }
 
@@ -229,7 +262,7 @@ export class Animal {
     const e = this.enclosure;
     const free = e.animalSpots.filter((sp) => !e.takenSpots.has(sp));
     if (!free.length) return false;
-    const spot = free[Math.floor(Math.random() * free.length)];
+    const spot = this.rng.pick(free);
     e.takenSpots.add(spot);
     this.fenceSpot = spot;
     this.target.set(spot.x, 0, spot.z);
@@ -256,7 +289,7 @@ export class Animal {
       this.enclosure.takenSpots.delete(this.fenceSpot);
       this.fenceSpot = null;
     }
-    if (state === 'greet') this.roarIn = this.species.id === 'lion' && Math.random() < 0.6 ? randFloat(2, 6) : Infinity;
+    if (state === 'greet') this.roarIn = this.species.id === 'lion' && this.rng.next() < 0.6 ? this.rng.float(2, 6) : Infinity;
     this.state = state;
     this.stateTime = duration;
     this.moveTime = 0;
@@ -283,8 +316,8 @@ export class Animal {
       this.walking = false;
       const arrived = this.path.length <= 1;
       if (this.state === 'toFeeder' && arrived && dist < 1.5) this.setState('eat');
-      else if (this.state === 'toFence' && arrived && dist < 1) this.setState('greet', randFloat(8, 15));
-      else this.setState('idle', randFloat(1, 4));
+      else if (this.state === 'toFence' && arrived && dist < 1) this.setState('greet', this.rng.float(8, 15));
+      else this.setState('idle', this.rng.float(1, 4));
       return;
     }
 
@@ -302,7 +335,7 @@ export class Animal {
       p.z = nz;
     } else if (!this.slide(nx - p.x, nz - p.z, dx, dz) && diff < 0.3) {
       // Heading into the fence: give up on this target.
-      this.setState('idle', randFloat(1, 3));
+      this.setState('idle', this.rng.float(1, 3));
     }
     this.walking = step > 0.0005;
     this.stride += step / (this.model.legLength * this.root.scale.x) * 1.7;
@@ -349,7 +382,7 @@ export class Animal {
     const p = this.root.position;
     this.yaw = lerpAngle(this.yaw, Math.atan2(f.x - p.x, f.z - p.z), 1 - Math.exp(-dt * 5));
 
-    if (this.hunger > 0.98 || !this.feeder.hasFood) this.setState('idle', randFloat(2, 5));
+    if (this.hunger > 0.98 || !this.feeder.hasFood) this.setState('idle', this.rng.float(2, 5));
   }
 
   private animate(dt: number): void {
@@ -371,8 +404,8 @@ export class Animal {
     // Head: look around when idle, dip when eating, rest when asleep.
     this.lookTimer -= dt;
     if (this.lookTimer <= 0) {
-      this.lookTimer = randFloat(1.5, 4);
-      this.lookYaw = this.state === 'idle' ? randFloat(-0.6, 0.6) : 0;
+      this.lookTimer = this.rng.float(1.5, 4);
+      this.lookYaw = this.state === 'idle' ? this.rng.float(-0.6, 0.6) : 0;
     }
     let pitch = 0;
     if (eating) pitch = m.eatPitch + Math.sin(this.time * 7) * 0.08;

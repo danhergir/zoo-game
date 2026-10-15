@@ -3,6 +3,7 @@ import { buildModel, poseLegs, type AnimalModel } from './animals/models';
 import type { SpeciesId } from './animals/species';
 import type { Enclosure } from './enclosure';
 import { BENCHES, DECKS, PLAZA, routeAlongPaths, type Spot } from './layout';
+import { Rng } from './rng';
 import { Visitor } from './visitors/Visitor';
 
 /**
@@ -183,6 +184,8 @@ export class ReverseZoo {
   /** Fence spots for people, three per animal spot, a step closer to the fence. */
   private readonly fenceSpots = new Map<Enclosure, Spot[]>();
   private built = false;
+  /** The reverse zoo is a local view, so it doesn't need to match other browsers. */
+  private readonly rng = new Rng(`reverse:${Math.random()}`);
 
   constructor(
     parent: THREE.Object3D,
@@ -234,8 +237,8 @@ export class ReverseZoo {
     const counts: Record<string, number> = { 'Zebra Plains': 8, 'Elephant Valley': 7, 'Lion Rock': 6 };
     for (const e of this.enclosures) {
       for (let i = 0; i < (counts[e.name] ?? 4); i++) {
-        const start = e.randomPoint(1.2);
-        const person = new Visitor({ x: start.x, z: start.z, yaw: Math.random() * 6 }, Math.random() < 0.25);
+        const start = e.randomPoint(1.2, this.rng);
+        const person = new Visitor({ x: start.x, z: start.z, yaw: this.rng.float(0, 6) }, this.rng.chance(0.25), false, this.rng.fork('captive'));
         this.group.add(person.root);
         const c = { person, enclosure: e };
         this.captives.push(c);
@@ -301,7 +304,7 @@ export class ReverseZoo {
         return;
       }
     }
-    const to = e.randomPoint(1.2);
+    const to = e.randomPoint(1.2, this.rng);
     const spot = { x: to.x, z: to.z, yaw: Math.random() * Math.PI * 2 };
     p.goVia(route(to), r < 0.8 ? { kind: 'stroll', spot } : { kind: 'rest', spot });
   }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Animal } from '../animals/Animal';
 import { BOULEVARD_Z, DECKS, EXIT_X, PLAZA, SEATS, type Spot } from '../layout';
+import { Rng } from '../rng';
 import { Visitor, type Activity } from './Visitor';
 
 /** Seconds a visitor holds out a treat before the animal takes it. */
@@ -30,11 +31,22 @@ export class Crowd {
   private readonly taken = new Set<Spot>();
   private readonly offers: TreatOffer[] = [];
   private spawnTimer = 0;
+  private rng = new Rng('crowd');
 
   constructor(
     private readonly scene: THREE.Object3D,
     private readonly hooks: CrowdHooks,
   ) {}
+
+  /** Start of a zoo day: nobody in the park, fresh random stream. */
+  reset(rng: Rng): void {
+    for (const v of this.visitors) this.scene.remove(v.root);
+    this.visitors.length = 0;
+    this.taken.clear();
+    this.offers.length = 0;
+    this.spawnTimer = 0;
+    this.rng = rng;
+  }
 
   /** Average animal happiness, 0..1; a happier zoo draws more guests. */
   get rating(): number {
@@ -48,7 +60,7 @@ export class Crowd {
     if (open && this.spawnTimer <= 0 && this.visitors.length < MAX_VISITORS) {
       this.spawn();
       // Roughly one guest every 3 seconds at a perfect rating, slower when animals are unhappy.
-      this.spawnTimer = THREE.MathUtils.randFloat(1.5, 4.5) / (0.3 + this.rating);
+      this.spawnTimer = this.rng.float(1.5, 4.5) / (0.3 + this.rating);
     }
 
     const closing = hour >= CLOSE_HOUR || hour < ARRIVE_FROM;
@@ -74,13 +86,14 @@ export class Crowd {
   }
 
   private spawn(): void {
-    const fromRight = Math.random() < 0.5;
+    const fromRight = this.rng.next() < 0.5;
     const start = {
       x: fromRight ? EXIT_X : -EXIT_X,
-      z: BOULEVARD_Z + THREE.MathUtils.randFloat(-1.8, 1.8),
+      z: BOULEVARD_Z + this.rng.float(-1.8, 1.8),
       yaw: fromRight ? -Math.PI / 2 : Math.PI / 2,
     };
-    const v = new Visitor(start, Math.random() < 0.25);
+    const child = this.rng.chance(0.25);
+    const v = new Visitor(start, child, false, this.rng.fork('visitor'));
     v.onArrive = () => this.react(v);
     this.scene.add(v.root);
     this.visitors.push(v);
@@ -96,7 +109,7 @@ export class Crowd {
     }
     v.plansLeft--;
 
-    const roll = Math.random();
+    const roll = this.rng.next();
     const activity = (roll < 0.65 && this.viewActivity()) || (roll < 0.85 && this.sitActivity()) || this.strollActivity();
     if (activity.kind !== 'stroll') this.taken.add(activity.spot);
     v.start(activity);
@@ -153,12 +166,12 @@ export class Crowd {
       if (!deck.treat) continue;
       const greeters = animals.filter((x) => x.enclosure.name === deck.enclosure && x.state === 'greet');
       for (const animal of greeters) {
-        if (this.offers.some((o) => o.animal === animal) || Math.random() > dt * 0.4) continue;
+        if (this.offers.some((o) => o.animal === animal) || this.rng.next() > dt * 0.4) continue;
         const near = this.visitors.filter(
           (v) => watching(v, deck.enclosure) && !v.offeringTreat && v.position.distanceTo(animal.position) < 7,
         );
         if (!near.length) continue;
-        const visitor = near[Math.floor(Math.random() * near.length)];
+        const visitor = this.rng.pick(near);
         visitor.offerTreat(deck.treat);
         this.offers.push({ visitor, animal, time: 0 });
       }
@@ -175,7 +188,7 @@ export class Crowd {
         if (!this.taken.has(spot)) options.push({ activity: { kind: 'view', spot, enclosure: d.enclosure }, weight });
       }
     }
-    let r = Math.random() * options.reduce((s, o) => s + o.weight, 0);
+    let r = this.rng.next() * options.reduce((s, o) => s + o.weight, 0);
     for (const o of options) {
       r -= o.weight;
       if (r <= 0) return o.activity;
@@ -185,25 +198,25 @@ export class Crowd {
 
   private sitActivity(): Activity | null {
     const free = SEATS.filter((s) => !this.taken.has(s));
-    return free.length ? { kind: 'sit', spot: free[Math.floor(Math.random() * free.length)] } : null;
+    return free.length ? { kind: 'sit', spot: this.rng.pick(free) } : null;
   }
 
   private strollActivity(): Activity {
     // Somewhere on the plaza (around the planter) or along the avenue.
-    if (Math.random() < 0.6) {
-      const a = Math.random() * Math.PI * 2;
-      const r = THREE.MathUtils.randFloat(3.4, PLAZA.r - 1.5);
+    if (this.rng.next() < 0.6) {
+      const a = this.rng.next() * Math.PI * 2;
+      const r = this.rng.float(3.4, PLAZA.r - 1.5);
       return { kind: 'stroll', spot: { x: PLAZA.x + Math.cos(a) * r, z: PLAZA.z + Math.sin(a) * r, yaw: a + Math.PI } };
     }
     return {
       kind: 'stroll',
-      spot: { x: THREE.MathUtils.randFloat(-3.5, 3.5), z: THREE.MathUtils.randFloat(-15, 26), yaw: Math.random() * 6 },
+      spot: { x: this.rng.float(-3.5, 3.5), z: this.rng.float(-15, 26), yaw: this.rng.next() * 6 },
     };
   }
 
   private exitSpot(v: Visitor): Spot {
-    const right = v.position.x > 0 ? Math.random() < 0.8 : Math.random() < 0.2;
-    return { x: right ? EXIT_X : -EXIT_X, z: BOULEVARD_Z + THREE.MathUtils.randFloat(-2, 2), yaw: 0 };
+    const right = v.position.x > 0 ? this.rng.next() < 0.8 : this.rng.next() < 0.2;
+    return { x: right ? EXIT_X : -EXIT_X, z: BOULEVARD_Z + this.rng.float(-2, 2), yaw: 0 };
   }
 
   private release(v: Visitor): void {

@@ -3,12 +3,13 @@ import './style.css';
 import { Animal } from './animals/Animal';
 import { SPECIES, type SpeciesId } from './animals/species';
 import { CameraRig } from './camera';
-import { zooTime } from './clock';
+import { HOUR_SECONDS, RESET_HOUR, lastReset, zooTime } from './clock';
 import { Enclosure, type EnclosureDef } from './enclosure';
 import { Feeder, type FeederDef } from './feeder';
 import { DECKS, isPath } from './layout';
 import { Picker } from './picking';
 import { ReverseZoo } from './reverse';
+import { Rng, withSeededRandom } from './rng';
 import { World } from './scene';
 import { Hud, type GameState } from './ui/hud';
 import { Inspector } from './ui/inspector';
@@ -17,7 +18,8 @@ import { Keepers } from './visitors/Keepers';
 
 const OPEN_HOUR = 9;
 const CLOSE_HOUR = 18;
-const SIM_STEP = 1 / 30;
+/** Fixed simulation step. Fixed (not per-frame) so every browser computes exactly the same zoo. */
+const SIM_STEP = 1 / 60;
 
 interface HabitatDef {
   enclosure: EnclosureDef;
@@ -76,7 +78,8 @@ const HABITATS: HabitatDef[] = [
 ];
 
 const app = document.getElementById('app')!;
-const world = new World(app);
+// Scenery is procedural; seed it so everyone sees the same zoo.
+const world = withSeededRandom('tiny-zoo:world', () => new World(app));
 const rig = new CameraRig(world.renderer.domElement);
 world.attachCamera(rig.camera);
 const state: GameState = zooTime(Date.now());
@@ -91,28 +94,39 @@ const enclosures: Enclosure[] = [];
 const feeders: Feeder[] = [];
 const animals: Animal[] = [];
 
+// Fixed seeds: same rocks, trees, names and animal sizes for everyone.
+const worldRng = new Rng('tiny-zoo:animals');
 for (const h of HABITATS) {
-  const enclosure = new Enclosure(h.enclosure);
-  const feeder = new Feeder({ ...h.feeder, name: h.enclosure.name });
+  const enclosure = withSeededRandom(
+    `tiny-zoo:enclosure-textures:${h.enclosure.name}`,
+    () => new Enclosure(h.enclosure, new Rng(`tiny-zoo:enclosure:${h.enclosure.name}`)),
+  );
+  const feeder = withSeededRandom(`tiny-zoo:feeder:${h.enclosure.name}`, () => new Feeder({ ...h.feeder, name: h.enclosure.name }));
   world.scene.add(enclosure.group, feeder.root);
   enclosures.push(enclosure);
   feeders.push(feeder);
 
   const species = SPECIES[h.species];
-  const names = [...species.names].sort(() => Math.random() - 0.5);
+  const names = [...species.names];
+  for (let i = names.length - 1; i > 0; i--) {
+    const j = worldRng.int(i + 1);
+    [names[i], names[j]] = [names[j], names[i]];
+  }
   for (let i = 0; i < h.count; i++) {
-    const animal = new Animal(species, names[i % names.length], i < h.males, enclosure, feeder);
+    const animal = new Animal(species, names[i % names.length], i < h.males, enclosure, feeder, worldRng.fork('animal'));
     live.add(animal.root);
     animals.push(animal);
   }
 }
 
-world.decorate(
-  // No plants on paths, along fences, or on rocks and ponds inside enclosures.
-  (x, z) =>
-    isPath(x, z, 0.8) ||
-    enclosures.some((e) => (e.contains(x, z) ? !e.walkable(x, z, 1) : e.occupies(x, z, 1.2))),
-  (x, z) => enclosures.some((e) => e.contains(x, z)),
+withSeededRandom('tiny-zoo:plants', () =>
+  world.decorate(
+    // No plants on paths, along fences, or on rocks and ponds inside enclosures.
+    (x, z) =>
+      isPath(x, z, 0.8) ||
+      enclosures.some((e) => (e.contains(x, z) ? !e.walkable(x, z, 1) : e.occupies(x, z, 1.2))),
+    (x, z) => enclosures.some((e) => e.contains(x, z)),
+  ),
 );
 
 // Selection ring that follows the inspected animal.
@@ -144,15 +158,9 @@ function select(animal: Animal | null): void {
 new Picker(
   world.renderer.domElement,
   rig.camera,
-  () => (reverse.active ? [] : [...animals.map((a) => a.root), ...feeders.map((f) => f.root)]),
-  (pick) => {
-    if (!pick) return select(null);
-    if (pick.kind === 'animal') return select(pick.animal);
-    const f = pick.feeder;
-    if (f.fraction > 0.97) return hud.toast(`The ${f.name} feeder is full`);
-    if (keepers.dispatch(f)) hud.toast(`A keeper is on the way to ${f.name}`, 'good');
-    else hud.toast(`A keeper is already on the way to ${f.name}`);
-  },
+  // Only animals are clickable: inspecting is local, while anything that changed the zoo would desync it.
+  () => (reverse.active ? [] : animals.map((a) => a.root)),
+  (pick) => select(pick?.kind === 'animal' ? pick.animal : null),
 );
 
 const keepers = new Keepers(
@@ -239,19 +247,49 @@ function separate(): void {
 
 const isOpen = (hour: number) => hour >= OPEN_HOUR && hour < CLOSE_HOUR;
 
-/** Read the shared real-time clock and announce new days and opening/closing. */
-function syncClock(): void {
-  const { day, hour } = zooTime(Date.now() + clockOffsetMs);
+/**
+ * Shared simulation. Each night at RESET_HOUR the zoo returns to a state
+ * every browser agrees on (seeded by the reset number), then runs in fixed
+ * steps. A browser opening the page fast-forwards from the last reset to now,
+ * so everyone sees the same animals and visitors doing the same things.
+ */
+let simReset = Number.NaN;
+let simSteps = 0;
+
+/** Zoo hour at the current simulation step. */
+const simHour = () => (RESET_HOUR + (simSteps * SIM_STEP) / HOUR_SECONDS) % 24;
+
+function resetSimulation(index: number): void {
+  const seed = (name: string) => new Rng(`tiny-zoo:reset ${index}:${name}`);
+  animals.forEach((a, i) => a.reset(seed(`animal ${i}`)));
+  for (const f of feeders) f.refill();
+  for (const e of enclosures) e.takenSpots.clear();
+  crowd.reset(seed('crowd'));
+  keepers.reset(seed('keepers'));
+  simReset = index;
+  simSteps = 0;
+}
+
+/** Bring the simulation up to real time `nowMs`, resetting first if a 4:00 reset has passed. */
+function catchUp(nowMs: number): void {
+  const { index, startMs } = lastReset(nowMs);
+  const target = Math.floor((nowMs - startMs) / 1000 / SIM_STEP);
+  if (index !== simReset || target < simSteps) resetSimulation(index);
+  while (simSteps < target) {
+    step(SIM_STEP, simHour());
+    simSteps++;
+  }
+  const hour = simHour();
   if (isOpen(hour) !== isOpen(state.hour)) {
     hud.toast(isOpen(hour) ? 'The zoo is open! 🎟️' : 'The zoo is closed for the night', isOpen(hour) ? 'good' : 'info');
   }
-  state.day = day;
   state.hour = hour;
+  state.day = zooTime(nowMs).day;
 }
 
-function step(dt: number): void {
-  for (const a of animals) a.update(dt, state.hour);
-  crowd.update(dt, state.hour);
+function step(dt: number, hour: number): void {
+  for (const a of animals) a.update(dt, hour);
+  crowd.update(dt, hour);
   keepers.update(dt);
   reverse.update(dt);
   separate();
@@ -269,7 +307,7 @@ window.addEventListener('resize', () => {
   rig.resize();
 });
 
-hud.toast('Welcome! Click an animal to inspect it, or a feeder to refill it.', 'good');
+hud.toast('Welcome! Click an animal to see how it’s doing.', 'good');
 
 function frame(dt: number): void {
   for (const f of feeders) f.syncVisuals();
@@ -288,11 +326,9 @@ function frame(dt: number): void {
 const timer = new THREE.Timer();
 world.renderer.setAnimationLoop((time) => {
   timer.update(time);
-  // After a backgrounded tab the clock simply jumps ahead; the animals carry on from where they were.
   const dt = Math.min(timer.getDelta(), 0.1);
-  syncClock();
-  // Simulate every frame (in chunks of at most SIM_STEP) so motion matches the display's refresh rate.
-  for (let left = dt; left > 1e-6; left -= SIM_STEP) step(Math.min(left, SIM_STEP));
+  // Usually one step per frame; after a backgrounded tab, a fast-forward to now.
+  catchUp(Date.now() + clockOffsetMs);
   frame(dt);
 });
 
@@ -316,12 +352,33 @@ if (import.meta.env.DEV) {
         }
       },
       advance(seconds: number) {
-        for (let t = 0; t < seconds; t += SIM_STEP) {
-          clockOffsetMs += SIM_STEP * 1000;
-          syncClock();
-          step(SIM_STEP);
-        }
+        clockOffsetMs += seconds * 1000;
+        catchUp(Date.now() + clockOffsetMs);
         frame(SIM_STEP);
+      },
+      /** Where the shared simulation is: reset number and step count since it. */
+      get sim() {
+        return { reset: simReset, steps: simSteps, hour: simHour() };
+      },
+      /** A hash of everything that should match across browsers. */
+      fingerprint(): string {
+        const parts: number[] = [simReset, simSteps];
+        for (const a of animals) parts.push(a.position.x, a.position.z, a.hunger, a.energy, a.happiness);
+        for (const f of feeders) parts.push(f.stock);
+        for (const v of [...crowd.visitors, ...keepers.active]) parts.push(v.position.x, v.position.z);
+        const text = parts.join(',') + animals.map((a) => a.state).join(',');
+        let h = 2166136261;
+        for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+        return `${(h >>> 0).toString(16)} (${crowd.visitors.length} guests, ${keepers.active.length} keepers)`;
+      },
+      /** Re-run reset `index` for `steps` steps from scratch and return the fingerprint. */
+      replay(index: number, steps: number): string {
+        resetSimulation(index);
+        while (simSteps < steps) {
+          step(SIM_STEP, simHour());
+          simSteps++;
+        }
+        return this.fingerprint();
       },
     },
   });

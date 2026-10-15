@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeRig } from '../merge';
+import type { Rng } from '../rng';
 
 /** A small stylized person. Faces +Z with feet at y = 0 (before scaling). */
 export interface PersonModel {
@@ -29,9 +30,6 @@ const HATS = ['#d9c08a', '#e85d5d', '#3a3f58', '#f5f5f0', '#4f8fdc'];
 /** One material for everyone; each part carries its color as vertex colors, so a joint merges into one mesh. */
 const personMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
 
-function pick<T>(list: T[]): T {
-  return list[Math.floor(Math.random() * list.length)];
-}
 
 // Shared geometries: every visitor reuses the same buffers.
 const geo = {
@@ -65,7 +63,8 @@ function part(g: THREE.BufferGeometry, color: string, x = 0, y = 0, z = 0): THRE
 /** Zookeeper uniform: olive shirt, khaki trousers, wide-brim hat. */
 const KEEPER = { shirt: '#5d7a3a', pants: '#8a7550', hat: '#c9a86a' };
 
-export function buildPerson(child: boolean, keeper = false): PersonModel {
+export function buildPerson(child: boolean, keeper: boolean, rng: Rng): PersonModel {
+  const pick = <T,>(list: T[]): T => rng.pick(list);
   const root = new THREE.Group();
   const pose = new THREE.Group();
   root.add(pose);
@@ -90,7 +89,7 @@ export function buildPerson(child: boolean, keeper = false): PersonModel {
   }
 
   pose.add(part(geo.torso, shirt, 0, 1.12, 0));
-  if (!child && !keeper && Math.random() < 0.25) pose.add(part(geo.backpack, pick(HATS), 0, 1.15, -0.2));
+  if (!child && !keeper && rng.next() < 0.25) pose.add(part(geo.backpack, pick(HATS), 0, 1.15, -0.2));
 
   const shoulders: THREE.Group[] = [];
   for (const side of [1, -1]) {
@@ -105,7 +104,7 @@ export function buildPerson(child: boolean, keeper = false): PersonModel {
   const head = new THREE.Group();
   head.position.y = 1.5;
   head.add(part(geo.head, skin, 0, 0.14, 0));
-  const hat = keeper ? 0 : Math.random();
+  const hat = keeper ? 0 : rng.next();
   if (hat < 0.25) {
     const color = keeper ? KEEPER.hat : pick(HATS);
     head.add(part(geo.brim, color, 0, 0.26, 0), part(geo.crown, keeper ? KEEPER.hat : pick(HATS), 0, 0.33, 0));
@@ -116,7 +115,7 @@ export function buildPerson(child: boolean, keeper = false): PersonModel {
   }
   pose.add(head);
 
-  const scale = child ? THREE.MathUtils.randFloat(0.58, 0.7) : THREE.MathUtils.randFloat(0.92, 1.06);
+  const scale = child ? rng.float(0.58, 0.7) : rng.float(0.92, 1.06);
   root.scale.setScalar(scale);
   mergeRig(root);
   const carry = new THREE.Group();

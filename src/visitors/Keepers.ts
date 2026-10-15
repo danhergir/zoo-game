@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Feeder } from '../feeder';
 import { DECKS, STAFF_DOOR } from '../layout';
+import { Rng } from '../rng';
 import { Visitor } from './Visitor';
 
 /** A feeder below this fraction gets a keeper sent to it. */
@@ -49,11 +50,20 @@ function foodItem(feeder: Feeder): THREE.Object3D {
 export class Keepers {
   readonly active: Visitor[] = [];
   private readonly assigned = new Map<Feeder, Visitor>();
+  private rng = new Rng('keepers');
 
   constructor(
     private readonly scene: THREE.Object3D,
     private readonly feeders: { feeder: Feeder; enclosure: string }[],
   ) {}
+
+  /** Start of a zoo day: everyone back in the hut, fresh random stream. */
+  reset(rng: Rng): void {
+    for (const k of this.active) this.scene.remove(k.root);
+    this.active.length = 0;
+    this.assigned.clear();
+    this.rng = rng;
+  }
 
   /** Is a keeper on the way to (or working at) this feeder? */
   busyWith(feeder: Feeder): boolean {
@@ -75,7 +85,7 @@ export class Keepers {
     const entry = this.feeders.find((f) => f.feeder === feeder);
     const deck = entry && DECKS.find((d) => d.enclosure === entry.enclosure);
     if (!deck) return false;
-    const k = new Visitor(STAFF_DOOR, false, true);
+    const k = new Visitor(STAFF_DOOR, false, true, this.rng.fork('keeper'));
     k.hold(foodItem(feeder));
     k.start({ kind: 'feed', spot: deck.feedSpot, feeder });
     this.scene.add(k.root);

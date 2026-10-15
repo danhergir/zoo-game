@@ -3,6 +3,7 @@ import type { Spot } from './layout';
 import { dirtTexture, repeated } from './materials';
 import { mergeStatic } from './merge';
 import { buildGrid, findPath, type Grid } from './pathfinding';
+import type { Rng } from './rng';
 
 export interface EnclosureDef {
   name: string;
@@ -56,7 +57,8 @@ export class Enclosure {
   /** Walkability grids, one per (rounded) animal size. */
   private readonly grids = new Map<number, Grid>();
 
-  constructor(def: EnclosureDef) {
+  /** `rng` places the scenery; seed it the same everywhere so obstacles match. */
+  constructor(def: EnclosureDef, private readonly rng: Rng) {
     this.name = def.name;
     this.pts = def.points.map(([x, z]) => new THREE.Vector2(x, z));
     for (const p of this.pts) {
@@ -123,10 +125,10 @@ export class Enclosure {
   }
 
   /** A random walkable spot, away from the fence and scenery. */
-  randomPoint(margin: number, out = new THREE.Vector3()): THREE.Vector3 {
+  randomPoint(margin: number, rng: Rng, out = new THREE.Vector3()): THREE.Vector3 {
     for (let i = 0; i < 60; i++) {
-      const x = THREE.MathUtils.randFloat(this.min.x, this.max.x);
-      const z = THREE.MathUtils.randFloat(this.min.y, this.max.y);
+      const x = rng.float(this.min.x, this.max.x);
+      const z = rng.float(this.min.y, this.max.y);
       if (this.containsWithMargin(x, z, margin) && !this.blocked(x, z, margin * 0.5)) {
         return out.set(x, 0, z);
       }
@@ -206,7 +208,7 @@ export class Enclosure {
       }
       return geo.rotateX(-Math.PI / 2);
     };
-    const seed = Math.random() * 10;
+    const seed = this.rng.next() * 10;
     const shore = new THREE.Mesh(wobbly(r + 1.1, seed), shoreMat);
     shore.position.set(x, 0.03, z);
     const water = new THREE.Mesh(wobbly(r, seed), waterMat);
@@ -216,12 +218,12 @@ export class Enclosure {
 
     const reedMat = new THREE.MeshStandardMaterial({ color: '#4f7a33', roughness: 1 });
     for (let i = 0; i < 26; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const d = r * (0.95 + Math.random() * 0.25);
-      const h = 0.6 + Math.random() * 0.8;
+      const a = this.rng.next() * Math.PI * 2;
+      const d = r * (0.95 + this.rng.next() * 0.25);
+      const h = 0.6 + this.rng.next() * 0.8;
       const reed = new THREE.Mesh(new THREE.ConeGeometry(0.05, h, 4), reedMat);
       reed.position.set(x + Math.cos(a) * d, h / 2, z + Math.sin(a) * d);
-      reed.rotation.set((Math.random() - 0.5) * 0.3, 0, (Math.random() - 0.5) * 0.3);
+      reed.rotation.set((this.rng.next() - 0.5) * 0.3, 0, (this.rng.next() - 0.5) * 0.3);
       this.group.add(reed);
     }
     this.obstacles.push({ x, z, r: r * 1.12, solid: true });
@@ -229,17 +231,17 @@ export class Enclosure {
 
   /** A small cluster of rounded boulders. */
   private addRock(): void {
-    const pos = this.randomPoint(3);
-    const cluster = 1 + Math.floor(Math.random() * 3);
+    const pos = this.randomPoint(3, this.rng);
+    const cluster = 1 + Math.floor(this.rng.next() * 3);
     let extent = 0;
     for (let i = 0; i < cluster; i++) {
-      const r = THREE.MathUtils.randFloat(0.5, 1.4) * (i === 0 ? 1 : 0.6);
+      const r = this.rng.float(0.5, 1.4) * (i === 0 ? 1 : 0.6);
       const offset = i === 0 ? 0 : r + 0.4;
-      const a = Math.random() * Math.PI * 2;
+      const a = this.rng.next() * Math.PI * 2;
       const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), rockMat);
       rock.position.set(pos.x + Math.cos(a) * offset, r * 0.3, pos.z + Math.sin(a) * offset);
-      rock.scale.set(1, THREE.MathUtils.randFloat(0.55, 0.85), THREE.MathUtils.randFloat(0.8, 1.2));
-      rock.rotation.set(Math.random() * 0.4, Math.random() * Math.PI, Math.random() * 0.4);
+      rock.scale.set(1, this.rng.float(0.55, 0.85), this.rng.float(0.8, 1.2));
+      rock.rotation.set(this.rng.next() * 0.4, this.rng.next() * Math.PI, this.rng.next() * 0.4);
       rock.castShadow = rock.receiveShadow = true;
       this.group.add(rock);
       extent = Math.max(extent, offset + r);
@@ -249,11 +251,11 @@ export class Enclosure {
 
   /** Flat-topped acacia-style tree. */
   private addTree(): void {
-    const pos = this.randomPoint(4);
+    const pos = this.randomPoint(4, this.rng);
     const tree = new THREE.Group();
     const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.38, 4.2, 7), barkMat);
     trunk.position.y = 2.1;
-    trunk.rotation.z = (Math.random() - 0.5) * 0.15;
+    trunk.rotation.z = (this.rng.next() - 0.5) * 0.15;
     tree.add(trunk);
     for (const [x, y, z, r] of [[0, 4.7, 0, 3], [1.6, 4.4, 0.6, 1.8], [-1.5, 4.5, -0.5, 2]]) {
       const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), leafMat);
@@ -263,7 +265,7 @@ export class Enclosure {
     }
     tree.traverse((o) => (o.castShadow = true));
     tree.position.copy(pos);
-    tree.rotation.y = Math.random() * Math.PI;
+    tree.rotation.y = this.rng.next() * Math.PI;
     this.group.add(tree);
     this.obstacles.push({ x: pos.x, z: pos.z, r: 0.8, solid: true });
   }

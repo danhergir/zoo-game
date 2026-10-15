@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Feeder } from '../feeder';
 import { routeAlongPaths, type Spot } from '../layout';
+import type { Rng } from '../rng';
 import { buildPerson, type PersonModel } from './person';
 
 export type Activity =
@@ -31,7 +32,7 @@ const propGeo = {
   apple: new THREE.SphereGeometry(0.07, 10, 8),
 };
 
-const { lerp, randFloat, clamp } = THREE.MathUtils;
+const { lerp, clamp } = THREE.MathUtils;
 
 function lerpAngle(a: number, b: number, t: number): number {
   let d = (b - a) % (Math.PI * 2);
@@ -49,7 +50,7 @@ export class Visitor {
   readonly root: THREE.Group;
   activity: Activity | null = null;
   /** How many more things this guest wants to do before leaving. */
-  plansLeft = Math.floor(randFloat(2, 4));
+  plansLeft: number;
   /** Walks faster, e.g. when the zoo is closing. */
   hurry = false;
   phase: Phase = 'walking';
@@ -57,21 +58,21 @@ export class Visitor {
   onArrive: ((v: Visitor) => void) | null = null;
 
   private readonly model: PersonModel;
-  private readonly lane = randFloat(-2.6, 2.6);
-  private readonly speed = randFloat(1.7, 2.2);
+  private readonly lane: number;
+  private readonly speed: number;
   private readonly baseScale: number;
   /** 0..1 pop-in when arriving, back to 0 when leaving. */
   private appear = 0;
   private readonly route: THREE.Vector3[] = [];
   private timer = 0;
   private yaw = 0;
-  private stride = Math.random() * 10;
-  private time = Math.random() * 10;
+  private stride: number;
+  private time: number;
   private walking = false;
   private cheer = 0;
   private gesture: Gesture | null = null;
   private gestureTime = 0;
-  private nextGesture = randFloat(1, 3);
+  private nextGesture: number;
   private startleTime = 0;
   private offering: Treat | null = null;
   private readonly hand = new THREE.Group();
@@ -79,12 +80,20 @@ export class Visitor {
   private readonly flash = new THREE.Mesh(propGeo.flash, propMats.flash);
   private readonly treats: Record<Treat, THREE.Object3D>;
 
+  /** `rng` drives everything this person does; give each person its own stream. */
   constructor(
     start: Spot,
     readonly child: boolean,
-    readonly keeper = false,
+    readonly keeper: boolean,
+    private readonly rng: Rng,
   ) {
-    this.model = buildPerson(child, keeper);
+    this.plansLeft = rng.int(2) + 2;
+    this.lane = rng.float(-2.6, 2.6);
+    this.speed = rng.float(1.7, 2.2);
+    this.stride = rng.float(0, 10);
+    this.time = rng.float(0, 10);
+    this.nextGesture = rng.float(1, 3);
+    this.model = buildPerson(child, keeper, rng);
     this.root = this.model.root;
     this.baseScale = this.root.scale.x;
     this.root.scale.setScalar(0.001);
@@ -114,7 +123,7 @@ export class Visitor {
   endTreat(): void {
     if (this.offering) this.treats[this.offering].visible = false;
     this.offering = null;
-    this.nextGesture = randFloat(1, 3);
+    this.nextGesture = this.rng.float(1, 3);
   }
 
   get offeringTreat(): boolean {
@@ -225,12 +234,12 @@ export class Visitor {
     this.phase = a.kind === 'exit' ? 'leaving' : 'busy';
     this.timer =
       a.kind === 'view'
-        ? randFloat(7, 13)
+        ? this.rng.float(7, 13)
         : a.kind === 'sit' || a.kind === 'rest'
-          ? randFloat(10, 18)
+          ? this.rng.float(10, 18)
           : a.kind === 'feed'
             ? 5
-            : randFloat(2, 5);
+            : this.rng.float(2, 5);
     this.onArrive?.(this);
   }
 
@@ -245,14 +254,14 @@ export class Visitor {
       if (this.gestureTime <= 0 || !watching) {
         this.gesture = null;
         this.phone.visible = this.flash.visible = false;
-        this.nextGesture = randFloat(2, 5);
+        this.nextGesture = this.rng.float(2, 5);
       }
       return;
     }
     if (!watching || this.offering || this.startleTime > 0) return;
     this.nextGesture -= dt;
     if (this.nextGesture > 0) return;
-    const r = Math.random();
+    const r = this.rng.next();
     this.gesture = r < 0.45 ? 'photo' : r < 0.75 ? 'point' : 'wave';
     this.gestureTime = this.gesture === 'photo' ? 2.2 : 1.8;
     this.phone.visible = this.gesture === 'photo';

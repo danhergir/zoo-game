@@ -1,11 +1,9 @@
 import * as THREE from 'three';
-import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import type { Animal } from '../animals/Animal';
-import { BOULEVARD_Z, DECKS, EXIT_X, GATE_Z, PLAZA, SEATS, type Spot } from '../layout';
+import { BOULEVARD_Z, DECKS, EXIT_X, PLAZA, SEATS, type Spot } from '../layout';
 import { Visitor, type Activity } from './Visitor';
 
 const MAX_VISITORS = 36;
-const TICKET_PRICE = 8;
 /** Guests arrive while the zoo is open, until shortly before closing. */
 const ARRIVE_FROM = 9;
 const ARRIVE_UNTIL = 16.5;
@@ -13,8 +11,6 @@ const CLOSE_HOUR = 18;
 
 export interface CrowdHooks {
   animals: Animal[];
-  /** Called whenever a guest pays; `at` is where to show the amount. */
-  onPay: (amount: number, at: THREE.Vector3) => void;
 }
 
 /** Spawns guests, hands them things to do, and sends them home at closing. */
@@ -46,10 +42,6 @@ export class Crowd {
     const closing = hour >= CLOSE_HOUR || hour < ARRIVE_FROM;
     for (const v of this.visitors) {
       v.update(dt);
-      if (!v.paidTicket && v.position.z < GATE_Z) {
-        v.paidTicket = true;
-        this.hooks.onPay(TICKET_PRICE, v.position);
-      }
       if (closing && v.activity?.kind !== 'exit') {
         this.release(v);
         v.hurry = true;
@@ -90,18 +82,14 @@ export class Crowd {
     v.start(activity);
   }
 
-  /** When a guest reaches a viewing deck: react to what they see, maybe tip. */
+  /** When a guest reaches a viewing deck: react to what they see. */
   private react(v: Visitor): void {
     const a = v.activity;
     if (a?.kind !== 'view') return;
     const animals = this.hooks.animals.filter((x) => x.enclosure.name === a.enclosure);
     const visible = animals.filter((x) => x.state !== 'sleep' && x.position.distanceTo(v.position) < 26);
     const mood = animals.reduce((s, x) => s + x.happiness, 0) / animals.length;
-    if (visible.length === 0 || mood <= 0.3) return;
-    if (mood > 0.75) v.celebrate();
-    const appeal = animals[0].species.appeal;
-    const tip = Math.round(appeal * mood * (0.5 + visible.length / animals.length) * 1.5);
-    if (tip > 0) this.hooks.onPay(tip, v.position);
+    if (visible.length > 0 && mood > 0.75) v.celebrate();
   }
 
   private viewActivity(): Activity | null {
@@ -137,18 +125,4 @@ export class Crowd {
   private release(v: Visitor): void {
     if (v.activity) this.taken.delete(v.activity.spot);
   }
-}
-
-/** Floating "+$5" text that rises and fades. */
-export function floatText(scene: THREE.Scene, text: string, at: THREE.Vector3): void {
-  const el = document.createElement('div');
-  el.className = 'float-money';
-  el.textContent = text;
-  const obj = new CSS2DObject(el);
-  obj.position.set(at.x, at.y + 2.4, at.z);
-  scene.add(obj);
-  setTimeout(() => {
-    scene.remove(obj);
-    el.remove();
-  }, 1400);
 }

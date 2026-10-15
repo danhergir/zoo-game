@@ -32,7 +32,6 @@ export class Visitor {
   activity: Activity | null = null;
   /** How many more things this guest wants to do before leaving. */
   plansLeft = Math.floor(randFloat(2, 4));
-  paidTicket = false;
   /** Walks faster, e.g. when the zoo is closing. */
   hurry = false;
   phase: Phase = 'walking';

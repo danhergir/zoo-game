@@ -1,27 +1,18 @@
 export interface GameState {
-  money: number;
   day: number;
   hour: number;
 }
 
-/** Top bar (money, clock, happiness, guests), toasts and the controls hint. */
+/** Time of day, toasts and the controls hint. */
 export class Hud {
-  private readonly moneyEl: HTMLElement;
   private readonly clockEl: HTMLElement;
-  private readonly moodEl: HTMLElement;
-  private readonly guestsEl: HTMLElement;
   private readonly toasts: HTMLElement;
-  private shownMoney = NaN;
+  private shownMinute = -1;
 
   constructor(root: HTMLElement, private readonly state: GameState) {
     const bar = el('div', 'hud-bar');
-    this.moneyEl = el('div', 'hud-stat money');
     this.clockEl = el('div', 'hud-stat');
-    this.moodEl = el('div', 'hud-stat');
-    this.guestsEl = el('div', 'hud-stat');
-    this.moodEl.title = 'Average animal happiness';
-    this.guestsEl.title = 'Guests in the zoo';
-    bar.append(this.moneyEl, this.clockEl, this.moodEl, this.guestsEl);
+    bar.append(this.clockEl);
 
     this.toasts = el('div', 'toasts');
 
@@ -40,20 +31,13 @@ export class Hud {
     root.append(bar, this.toasts, help);
   }
 
-  update(avgHappiness: number, guests: number): void {
+  update(): void {
     const s = this.state;
-    if (Math.round(s.money) !== this.shownMoney) {
-      if (s.money > this.shownMoney) this.flash(this.moneyEl);
-      this.shownMoney = Math.round(s.money);
-      this.moneyEl.textContent = `💰 $${this.shownMoney.toLocaleString()}`;
-    }
+    const minute = Math.floor(s.hour * 60);
+    if (minute === this.shownMinute) return;
+    this.shownMinute = minute;
     const h = Math.floor(s.hour);
-    const m = Math.floor((s.hour - h) * 60);
-    const open = s.hour >= 9 && s.hour < 18 ? 'Open' : 'Closed';
-    this.clockEl.textContent = `${s.hour >= 6 && s.hour < 19 ? '☀️' : '🌙'} Day ${s.day.toLocaleString()} · ${pad(h)}:${pad(m)} · ${open}`;
-    const face = avgHappiness > 0.75 ? '😄' : avgHappiness > 0.5 ? '🙂' : avgHappiness > 0.3 ? '😐' : '😟';
-    this.moodEl.textContent = `${face} ${Math.round(avgHappiness * 100)}%`;
-    this.guestsEl.textContent = `🧑‍🤝‍🧑 ${guests}`;
+    this.clockEl.textContent = `${s.hour >= 6 && s.hour < 19 ? '☀️' : '🌙'} ${pad(h)}:${pad(minute % 60)}`;
   }
 
   toast(message: string, kind: 'info' | 'warn' | 'good' = 'info'): void {
@@ -62,12 +46,6 @@ export class Hud {
     this.toasts.append(t);
     setTimeout(() => t.classList.add('out'), 3200);
     setTimeout(() => t.remove(), 3700);
-  }
-
-  private flash(node: HTMLElement): void {
-    node.classList.remove('flash');
-    void node.offsetWidth; // restart the animation
-    node.classList.add('flash');
   }
 }
 

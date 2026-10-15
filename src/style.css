@@ -85,17 +85,6 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
-.hud-stat.money.flash {
-  animation: flash 0.6s ease-out;
-}
-
-@keyframes flash {
-  from {
-    color: var(--accent);
-    transform: scale(1.08);
-  }
-}
-
 /* Toasts */
 .toasts {
   position: absolute;
@@ -241,68 +230,6 @@ button {
 }
 
 /* World-space labels */
-.feeder-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 999px;
-  padding: 3px 9px 3px 5px;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.feeder-label .bar {
-  width: 52px;
-  height: 6px;
-}
-
-.feeder-icon {
-  font-size: 14px;
-}
-
-.feeder-hint {
-  display: none;
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.feeder-label.hover .feeder-hint,
-.feeder-label.empty .feeder-hint {
-  display: inline;
-}
-
-.feeder-label.low .bar i {
-  background: var(--warn);
-}
-
-.feeder-label.empty {
-  border-color: var(--bad);
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  50% {
-    box-shadow: 0 0 0 4px rgba(229, 96, 77, 0.35);
-  }
-}
-
-.float-money {
-  color: #ffe27a;
-  font-weight: 800;
-  font-size: 15px;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
-  animation: rise 1.4s ease-out forwards;
-}
-
-@keyframes rise {
-  to {
-    translate: 0 -36px;
-    opacity: 0;
-  }
-}
-
 .bubble {
   font-size: 20px;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));

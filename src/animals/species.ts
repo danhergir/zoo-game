@@ -22,8 +22,6 @@ export interface SpeciesDef {
   hungryAt: number;
   /** Chance to idle instead of wandering when it has nothing to do. */
   idleChance: number;
-  /** Income per game hour at full happiness, while the zoo is open. */
-  appeal: number;
   names: string[];
 }
 
@@ -40,7 +38,6 @@ export const SPECIES: Record<SpeciesId, SpeciesDef> = {
     tireRate: 0.004,
     hungryAt: 0.45,
     idleChance: 0.4,
-    appeal: 3,
     names: ['Ziggy', 'Marty', 'Stripe', 'Zuri', 'Domino', 'Pepper', 'Ozzy', 'Nala'],
   },
   elephant: {
@@ -55,7 +52,6 @@ export const SPECIES: Record<SpeciesId, SpeciesDef> = {
     tireRate: 0.003,
     hungryAt: 0.5,
     idleChance: 0.45,
-    appeal: 8,
     names: ['Dumbo', 'Tembo', 'Ellie', 'Babar', 'Kibo', 'Mosi'],
   },
   lion: {
@@ -70,7 +66,6 @@ export const SPECIES: Record<SpeciesId, SpeciesDef> = {
     tireRate: 0.006,
     hungryAt: 0.4,
     idleChance: 0.7,
-    appeal: 7,
     names: ['Simba', 'Leo', 'Kiara', 'Sarabi', 'Aslan', 'Zira', 'Kovu'],
   },
 };

@@ -11,7 +11,7 @@ import { Picker } from './picking';
 import { World } from './scene';
 import { Hud, type GameState } from './ui/hud';
 import { Inspector } from './ui/inspector';
-import { Crowd, floatText } from './visitors/Crowd';
+import { Crowd } from './visitors/Crowd';
 
 const OPEN_HOUR = 9;
 const CLOSE_HOUR = 18;
@@ -36,7 +36,7 @@ const HABITATS: HabitatDef[] = [
       keepClear: [[-15, 0, 3]],
       pond: [-32, 4, 4],
     },
-    feeder: { food: 'hay', position: [-15, 0], capacity: 120, cost: 40, radius: 1.3 },
+    feeder: { food: 'hay', position: [-15, 0], capacity: 120, radius: 1.3 },
     species: 'zebra',
     count: 4,
     males: 2,
@@ -51,7 +51,7 @@ const HABITATS: HabitatDef[] = [
       keepClear: [[16, 0, 4]],
       pond: [33, -6, 5.5],
     },
-    feeder: { food: 'hay', position: [16, 0], capacity: 150, cost: 60, radius: 1.8 },
+    feeder: { food: 'hay', position: [16, 0], capacity: 150, radius: 1.8 },
     species: 'elephant',
     count: 2,
     males: 1,
@@ -66,7 +66,7 @@ const HABITATS: HabitatDef[] = [
       keepClear: [[0, -41.5, 3]],
       pond: [-9, -55, 3],
     },
-    feeder: { food: 'meat', position: [0, -41.5], capacity: 100, cost: 80, radius: 1.2 },
+    feeder: { food: 'meat', position: [0, -41.5], capacity: 100, radius: 1.2 },
     species: 'lion',
     count: 3,
     males: 1,
@@ -77,7 +77,7 @@ const app = document.getElementById('app')!;
 const world = new World(app);
 const rig = new CameraRig(world.renderer.domElement);
 world.attachCamera(rig.camera);
-const state: GameState = { money: 500, ...zooTime(Date.now()) };
+const state: GameState = zooTime(Date.now());
 /** Dev-only fast-forward on top of the real clock (see __zoo.advance). */
 let clockOffsetMs = 0;
 const hud = new Hud(app, state);
@@ -146,23 +146,12 @@ new Picker(
     if (pick.kind === 'animal') return select(pick.animal);
     const f = pick.feeder;
     if (f.fraction > 0.97) return hud.toast(`${f.name} feeder is already full`);
-    if (state.money < f.cost) return hud.toast(`Not enough money to refill ($${f.cost})`, 'warn');
-    state.money -= f.cost;
     f.refill();
-    hud.toast(`Refilled ${f.name} feeder (−$${f.cost})`, 'good');
-  },
-  (pick) => {
-    for (const f of feeders) f.setHover(pick?.kind === 'feeder' && pick.feeder === f);
+    hud.toast(`Refilled the ${f.name} feeder`, 'good');
   },
 );
 
-const crowd = new Crowd(world.scene, {
-  animals,
-  onPay: (amount, at) => {
-    state.money += amount;
-    floatText(world.scene, `+$${amount}`, at);
-  },
-});
+const crowd = new Crowd(world.scene, { animals });
 
 /** Keep animals from standing inside each other. */
 function separate(): void {
@@ -193,7 +182,6 @@ const isOpen = (hour: number) => hour >= OPEN_HOUR && hour < CLOSE_HOUR;
 /** Read the shared real-time clock and announce new days and opening/closing. */
 function syncClock(): void {
   const { day, hour } = zooTime(Date.now() + clockOffsetMs);
-  if (day !== state.day) hud.toast(`Day ${day.toLocaleString()} begins`);
   if (isOpen(hour) !== isOpen(state.hour)) {
     hud.toast(isOpen(hour) ? 'The zoo is open! 🎟️' : 'The zoo is closed for the night', isOpen(hour) ? 'good' : 'info');
   }
@@ -228,8 +216,7 @@ function frame(dt: number): void {
     ring.position.set(selected.position.x, 0.05, selected.position.z);
     inspector.update(rig.following === selected.root);
   }
-  const avg = animals.reduce((s, a) => s + a.happiness, 0) / animals.length;
-  hud.update(avg, crowd.visitors.length);
+  hud.update();
 
   world.setTimeOfDay(state.hour);
   rig.update(dt);

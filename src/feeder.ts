@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import type { Enclosure } from './enclosure';
 import { mergeChildren } from './merge';
 
@@ -10,7 +9,6 @@ export interface FeederDef {
   food: FoodType;
   position: [number, number];
   capacity: number;
-  cost: number;
   radius: number;
 }
 
@@ -21,22 +19,17 @@ export class Feeder {
   readonly name: string;
   readonly food: FoodType;
   readonly capacity: number;
-  readonly cost: number;
   readonly radius: number;
   readonly root = new THREE.Group();
   stock: number;
   onEmpty: (() => void) | null = null;
 
   private readonly foodMesh: THREE.Group;
-  private readonly labelEl: HTMLDivElement;
-  private readonly barEl: HTMLElement;
-  private shownPercent = -1;
 
   constructor(def: FeederDef) {
     this.name = def.name;
     this.food = def.food;
     this.capacity = def.capacity;
-    this.cost = def.cost;
     this.radius = def.radius;
     this.stock = def.capacity;
     this.root.position.set(def.position[0], 0, def.position[1]);
@@ -96,16 +89,6 @@ export class Feeder {
     mergeChildren(this.root);
     this.root.userData.pick = { kind: 'feeder', feeder: this };
 
-    this.labelEl = document.createElement('div');
-    this.labelEl.className = 'feeder-label';
-    this.labelEl.innerHTML = `
-      <span class="feeder-icon">${def.food === 'meat' ? '🍖' : '🌾'}</span>
-      <div class="bar"><i></i></div>
-      <span class="feeder-hint">Refill $${def.cost}</span>`;
-    this.barEl = this.labelEl.querySelector('i')!;
-    const label = new CSS2DObject(this.labelEl);
-    label.position.set(0, 2.6, 0);
-    this.root.add(label);
     this.syncVisuals();
   }
 
@@ -151,21 +134,10 @@ export class Feeder {
     return out.set(c.x, 0, c.z);
   }
 
-  /** Shows the refill price while the pointer is over the feeder. */
-  setHover(hover: boolean): void {
-    this.labelEl.classList.toggle('hover', hover);
-  }
-
   syncVisuals(): void {
-    const f = this.fraction;
     // The pile sinks into the tub as it empties.
+    const f = this.fraction;
     this.foodMesh.visible = f > 0.005;
     this.foodMesh.position.y = 0.1 - (1 - f) * 0.45;
-    const pct = Math.round(f * 100);
-    if (pct === this.shownPercent) return;
-    this.shownPercent = pct;
-    this.barEl.style.width = `${pct}%`;
-    this.labelEl.classList.toggle('low', pct < 25);
-    this.labelEl.classList.toggle('empty', pct === 0);
   }
 }

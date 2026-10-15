@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Feeder } from '../feeder';
-import { routeAlongPaths, type Spot } from '../layout';
+import { routeOnPaths, type Spot } from '../layout';
 import type { Rng } from '../rng';
 import { buildPerson, type PersonModel } from './person';
 
@@ -184,9 +184,9 @@ export class Visitor {
     this.animate(dt);
   }
 
-  /** Walk the zoo's paths to `to` (see routeAlongPaths). */
+  /** Walk the zoo's paths to `to` (see routeOnPaths). */
   private planRoute(to: Spot): void {
-    this.setRoute(routeAlongPaths(this.root.position, to, this.lane));
+    this.setRoute(routeOnPaths(this.root.position, to, this.lane));
   }
 
   /** Walk an explicit list of waypoints, e.g. a route inside an enclosure. */

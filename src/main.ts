@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import './style.css';
 import { Animal } from './animals/Animal';
-import { SPECIES, type SpeciesId } from './animals/species';
+import { SPECIES } from './animals/species';
 import { CameraRig } from './camera';
 import { HOUR_SECONDS, RESET_HOUR, lastReset, zooTime } from './clock';
-import { Enclosure, type EnclosureDef } from './enclosure';
-import { Feeder, type FeederDef } from './feeder';
+import { Enclosure } from './enclosure';
+import { Feeder } from './feeder';
+import { HABITATS } from './habitats';
 import { DECKS, isPath } from './layout';
 import { Picker } from './picking';
 import { ReverseZoo } from './reverse';
@@ -20,62 +21,6 @@ const OPEN_HOUR = 9;
 const CLOSE_HOUR = 18;
 /** Fixed simulation step. Fixed (not per-frame) so every browser computes exactly the same zoo. */
 const SIM_STEP = 1 / 60;
-
-interface HabitatDef {
-  enclosure: EnclosureDef;
-  feeder: Omit<FeederDef, 'name'>;
-  species: SpeciesId;
-  count: number;
-  males: number;
-}
-
-const HABITATS: HabitatDef[] = [
-  {
-    enclosure: {
-      name: 'Zebra Plains',
-      points: [[-46, -18], [-13, -22], [-9, 10], [-20, 25], [-48, 16]],
-      groundColor: '#c9b77a',
-      rocks: 3,
-      trees: 2,
-      keepClear: [[-12, 0, 3]],
-      pond: [-32, 4, 4],
-    },
-    feeder: { food: 'hay', position: [-12, 0], capacity: 120, radius: 1.3 },
-    species: 'zebra',
-    count: 4,
-    males: 2,
-  },
-  {
-    enclosure: {
-      name: 'Elephant Valley',
-      points: [[11, -22], [45, -20], [49, 14], [31, 26], [10, 18]],
-      groundColor: '#b59a6a',
-      rocks: 4,
-      trees: 2,
-      keepClear: [[12.6, 1, 4]],
-      pond: [33, -6, 5.5],
-    },
-    feeder: { food: 'hay', position: [12.6, 1], capacity: 150, radius: 1.8 },
-    species: 'elephant',
-    count: 2,
-    males: 1,
-  },
-  {
-    enclosure: {
-      name: 'Lion Rock',
-      points: [[-17, -37], [17, -37], [21, -60], [0, -69], [-21, -58]],
-      groundColor: '#d0a865',
-      rocks: 6,
-      trees: 1,
-      keepClear: [[0, -38.6, 3]],
-      pond: [-9, -55, 3],
-    },
-    feeder: { food: 'meat', position: [0, -38.6], capacity: 100, radius: 1.2 },
-    species: 'lion',
-    count: 3,
-    males: 1,
-  },
-];
 
 const app = document.getElementById('app')!;
 // Scenery is procedural; seed it so everyone sees the same zoo.
@@ -344,6 +289,7 @@ if (import.meta.env.DEV) {
       reverse,
       world,
       rig,
+      isPath,
       focus(name: string) {
         const a = animals.find((x) => x.name === name);
         if (a) {
@@ -370,6 +316,13 @@ if (import.meta.env.DEV) {
         let h = 2166136261;
         for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
         return `${(h >>> 0).toString(16)} (${crowd.visitors.length} guests, ${keepers.active.length} keepers)`;
+      },
+      /** Run `count` more simulation steps from the current state (no reset). */
+      steps(count: number): void {
+        for (let i = 0; i < count; i++) {
+          step(SIM_STEP, simHour());
+          simSteps++;
+        }
       },
       /** Re-run reset `index` for `steps` steps from scratch and return the fingerprint. */
       replay(index: number, steps: number): string {

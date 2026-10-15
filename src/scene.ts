@@ -19,12 +19,14 @@ function merge(...geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
   return mergeGeometries(geos.map((g) => (g.index ? g.toNonIndexed() : g)))!;
 }
 
-/** Center of the zoo; terrain is flat within ~80 units of it. */
+/** Center of the zoo; terrain is flat within FLAT_RADIUS of it. */
 const ZOO_CENTER_Z = -15;
+/** Radius of the flat ground the zoo is built on; hills rise beyond it. */
+const FLAT_RADIUS = 125;
 
 export function terrainHeight(x: number, z: number): number {
   const r = Math.hypot(x, z - ZOO_CENTER_Z);
-  const t = THREE.MathUtils.smoothstep(r, 80, 165);
+  const t = THREE.MathUtils.smoothstep(r, FLAT_RADIUS, FLAT_RADIUS + 85);
   if (t === 0) return 0;
   const n = 5 + 4 * Math.sin(x * 0.04) * Math.cos(z * 0.035) + 6 * Math.sin(x * 0.013 + z * 0.017 + 1.3);
   return t * Math.max(0.5, n) * 1.4;
@@ -42,7 +44,7 @@ export class World {
   /** Post-processing on/off (G key). */
   postEnabled = true;
 
-  private readonly fog = new THREE.Fog(SKY_HORIZON_DAY, 170, 430);
+  private readonly fog = new THREE.Fog(SKY_HORIZON_DAY, 230, 560);
   private readonly sky = new SkyDome();
   private readonly lampBulbs = new THREE.MeshStandardMaterial({
     color: '#fff3d0',
@@ -74,8 +76,8 @@ export class World {
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(4096, 4096);
     const cam = this.sun.shadow.camera;
-    cam.left = cam.bottom = -80;
-    cam.right = cam.top = 80;
+    cam.left = cam.bottom = -125;
+    cam.right = cam.top = 125;
     cam.near = 1;
     cam.far = 340;
     this.sun.shadow.bias = -0.0004;
@@ -177,7 +179,7 @@ export class World {
       lamp.position.set(x, 0, z);
       furniture.add(lamp);
       // A handful of real lights; the rest just glow.
-      if (i % 2 === 0) {
+      if (i % 2 === 0 && Math.abs(x) < 12) {
         const light = new THREE.PointLight('#ffc77a', 0, 16, 1.8);
         light.position.set(x, 3.3, z);
         this.lampLights.push(light);
@@ -468,7 +470,7 @@ function createForest(): THREE.Group {
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   }
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 });
-  const count = 260;
+  const count = 320;
   const pines = new THREE.InstancedMesh(pineGeo, mat, count);
   const rounds = new THREE.InstancedMesh(roundGeo, mat, count);
   pines.castShadow = rounds.castShadow = true;
@@ -483,7 +485,7 @@ function createForest(): THREE.Group {
   let ir = 0;
   for (let i = 0; i < count * 2; i++) {
     const a = Math.random() * Math.PI * 2;
-    const r = 78 + Math.pow(Math.random(), 0.7) * 180;
+    const r = FLAT_RADIUS + 10 + Math.pow(Math.random(), 0.7) * 190;
     const x = Math.cos(a) * r;
     const z = ZOO_CENTER_Z + Math.sin(a) * r;
     if (isPath(x, z, 4)) continue;
@@ -529,10 +531,10 @@ function createVegetation(
     return [Math.cos(a) * r, ZOO_CENTER_Z + Math.sin(a) * r];
   };
 
-  const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, 14000);
+  const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, 22000);
   let n = 0;
-  for (let i = 0; i < 30000 && n < tufts.count; i++) {
-    const [x, z] = random(140);
+  for (let i = 0; i < 50000 && n < tufts.count; i++) {
+    const [x, z] = random(FLAT_RADIUS + 50);
     if (blocked(x, z)) continue;
     const dry = inside(x, z);
     if (dry && Math.random() < 0.6) continue;
@@ -558,7 +560,7 @@ function createVegetation(
   const petals = ['#ffffff', '#ffd84d', '#ff8fb1', '#c18bff', '#ff7a59'];
   n = 0;
   for (let i = 0; i < 6000 && n < flowers.count; i++) {
-    const [x, z] = random(90);
+    const [x, z] = random(FLAT_RADIUS);
     if (blocked(x, z) || inside(x, z)) continue;
     // Flowers grow in patches near the paths.
     if (!isPath(x, z, 10) && Math.random() < 0.85) continue;
@@ -578,7 +580,7 @@ function createVegetation(
   );
   n = 0;
   for (let i = 0; i < 6000 && n < bushes.count; i++) {
-    const [x, z] = random(95);
+    const [x, z] = random(FLAT_RADIUS);
     if (blocked(x, z) || inside(x, z)) continue;
     // Bushes line the paths and fences.
     if (!isPath(x, z, 3.5) && Math.random() < 0.985) continue;

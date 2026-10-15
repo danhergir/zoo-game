@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { buildModel, poseLegs, type AnimalModel } from './animals/models';
 import type { SpeciesId } from './animals/species';
 import type { Enclosure } from './enclosure';
-import { BENCHES, DECKS, PLAZA, routeAlongPaths, type Spot } from './layout';
+import { BENCHES, DECKS, PLAZA, routeOnPaths, type Spot } from './layout';
 import { Rng } from './rng';
 import { Visitor } from './visitors/Visitor';
 
@@ -84,7 +84,7 @@ class Tourist {
     }
     this.phase = 'walking';
     this.route.length = 0;
-    for (const [x, z] of routeAlongPaths(this.root.position, plan.spot, this.lane)) this.route.push(new THREE.Vector3(x, 0, z));
+    for (const [x, z] of routeOnPaths(this.root.position, plan.spot, this.lane)) this.route.push(new THREE.Vector3(x, 0, z));
   }
 
   /** True once per roar, so the people in the lion enclosure can jump. */

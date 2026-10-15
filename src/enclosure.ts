@@ -16,6 +16,12 @@ export interface EnclosureDef {
   keepClear?: [number, number, number][];
   /** Taller acacias whose canopy sits above a giraffe's head. */
   tallTrees?: boolean;
+  /** Glass panels instead of a wooden fence (penguins). */
+  glass?: boolean;
+  /** Icy look: pale shore, no reeds (penguins). */
+  icy?: boolean;
+  /** Where the group gathers to sleep, as [x, z] (penguins huddle). */
+  huddle?: [number, number];
   /** Watering hole as [x, z, radius]. */
   pond?: [number, number, number];
 }
@@ -26,6 +32,8 @@ interface Obstacle {
   r: number;
   /** Animals can't walk through solid obstacles (rocks, trees, water). */
   solid: boolean;
+  /** Water: blocks walkers, but swimmers can go in. */
+  water?: boolean;
 }
 
 const postMat = new THREE.MeshStandardMaterial({ color: '#6b4528', roughness: 0.9 });
@@ -41,6 +49,14 @@ const waterMat = new THREE.MeshStandardMaterial({
   opacity: 0.88,
 });
 const shoreMat = new THREE.MeshStandardMaterial({ color: '#8d7a55', roughness: 1 });
+const iceShoreMat = new THREE.MeshStandardMaterial({ color: '#e4eef2', roughness: 0.6 });
+const deepWaterMat = new THREE.MeshStandardMaterial({
+  color: '#16618c',
+  roughness: 0.04,
+  metalness: 0.15,
+  transparent: true,
+  opacity: 0.9,
+});
 
 /** A fenced habitat: a polygon on the ground plus fence and scenery meshes. */
 export class Enclosure {
@@ -50,6 +66,16 @@ export class Enclosure {
   private readonly obstacles: Obstacle[] = [];
   private readonly min = new THREE.Vector2(Infinity, Infinity);
   private readonly max = new THREE.Vector2(-Infinity, -Infinity);
+  /** Icy ground: no plants grow here. */
+  get icy(): boolean {
+    return this.def.icy === true;
+  }
+
+  /** The pond, if any (swimmers use it). */
+  pond: { x: number; z: number; r: number } | null = null;
+  readonly huddle: { x: number; z: number } | null;
+  /** Is a keeper feeding at this enclosure right now? (penguins come running) */
+  feedingNow = false;
   /** Tree trunks (for browsers like giraffes). */
   readonly trees: { x: number; z: number }[] = [];
   /** How many visitors are watching from this enclosure's deck right now. */
@@ -58,12 +84,15 @@ export class Enclosure {
   animalSpots: Spot[] = [];
   /** Animal spots currently claimed. */
   readonly takenSpots = new Set<Spot>();
-  /** Walkability grids, one per (rounded) animal size. */
-  private readonly grids = new Map<number, Grid>();
+  /** Walkability grids, one per (rounded) animal size and swimming ability. */
+  private readonly grids = new Map<string, Grid>();
+  private readonly def: EnclosureDef;
 
   /** `rng` places the scenery; seed it the same everywhere so obstacles match. */
   constructor(def: EnclosureDef, private readonly rng: Rng) {
     this.name = def.name;
+    this.def = def;
+    this.huddle = def.huddle ? { x: def.huddle[0], z: def.huddle[1] } : null;
     this.pts = def.points.map(([x, z]) => new THREE.Vector2(x, z));
     for (const p of this.pts) {
       this.min.min(p);
@@ -97,21 +126,35 @@ export class Enclosure {
     return this.contains(x, z) || this.distanceToFence(x, z) < margin;
   }
 
-  /** Somewhere an animal of the given radius can stand. */
-  walkable(x: number, z: number, radius: number): boolean {
+  /** Somewhere an animal of the given radius can stand (or swim, for swimmers). */
+  walkable(x: number, z: number, radius: number, swims = false): boolean {
     if (!this.containsWithMargin(x, z, radius * 0.5)) return false;
-    return !this.obstacles.some((o) => o.solid && Math.hypot(o.x - x, o.z - z) < o.r + radius * 0.5);
+    return !this.obstacles.some((o) => o.solid && !(swims && o.water) && Math.hypot(o.x - x, o.z - z) < o.r + radius * 0.5);
+  }
+
+  /** Is (x, z) in the pond? */
+  inWater(x: number, z: number): boolean {
+    return this.pond !== null && Math.hypot(x - this.pond.x, z - this.pond.z) < this.pond.r * 0.97;
+  }
+
+  /** A random spot well inside the pond (for swimmers). */
+  pondPoint(rng: Rng, out = new THREE.Vector3()): THREE.Vector3 {
+    const p = this.pond!;
+    const a = rng.float(0, Math.PI * 2);
+    const r = Math.sqrt(rng.next()) * p.r * 0.75;
+    return out.set(p.x + Math.cos(a) * r, 0, p.z + Math.sin(a) * r);
   }
 
   /**
    * Route around ponds, rocks and trees for an animal of the given radius:
    * waypoints after `from`, ending at `to`. Null if `to` can't be reached.
    */
-  findPath(from: THREE.Vector3, to: THREE.Vector3, radius: number): THREE.Vector3[] | null {
-    const key = Math.ceil(radius * 4) / 4;
+  findPath(from: THREE.Vector3, to: THREE.Vector3, radius: number, swims = false): THREE.Vector3[] | null {
+    const r = Math.ceil(radius * 4) / 4;
+    const key = `${r}|${swims}`;
     let grid = this.grids.get(key);
     if (!grid) {
-      grid = buildGrid(this.min.x, this.min.y, this.max.x, this.max.y, 0.75, (x, z) => this.walkable(x, z, key));
+      grid = buildGrid(this.min.x, this.min.y, this.max.x, this.max.y, 0.75, (x, z) => this.walkable(x, z, r, swims));
       this.grids.set(key, grid);
     }
     const pts = findPath(grid, from.x, from.z, to.x, to.z);
@@ -119,8 +162,11 @@ export class Enclosure {
   }
 
   /** The rock, tree or pond (if any) that an animal of this radius would bump into here. */
-  obstacleAt(x: number, z: number, radius: number): { x: number; z: number; r: number } | null {
-    return this.obstacles.find((o) => o.solid && Math.hypot(o.x - x, o.z - z) < o.r + radius * 0.5) ?? null;
+  obstacleAt(x: number, z: number, radius: number, swims = false): { x: number; z: number; r: number } | null {
+    return (
+      this.obstacles.find((o) => o.solid && !(swims && o.water) && Math.hypot(o.x - x, o.z - z) < o.r + radius * 0.5) ??
+      null
+    );
   }
 
   /** Inside the polygon, at least `margin` from the fence. */
@@ -172,6 +218,10 @@ export class Enclosure {
   }
 
   private buildFence(): void {
+    if (this.def.glass) {
+      this.buildGlassFence();
+      return;
+    }
     const postGeo = new THREE.CylinderGeometry(0.13, 0.16, 1.8, 8).translate(0, 0.9, 0);
     const capGeo = new THREE.ConeGeometry(0.17, 0.2, 8).translate(0, 1.9, 0);
     const p = this.pts;
@@ -200,6 +250,44 @@ export class Enclosure {
     }
   }
 
+  /** Low glass panels on slim steel posts, so visitors see right in (penguins). */
+  private buildGlassFence(): void {
+    const glass = new THREE.MeshStandardMaterial({
+      color: '#cfeaf5',
+      roughness: 0.05,
+      metalness: 0.1,
+      transparent: true,
+      opacity: 0.32,
+      depthWrite: false,
+    });
+    const steel = new THREE.MeshStandardMaterial({ color: '#9aa4ab', roughness: 0.35, metalness: 0.7 });
+    const postGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.3, 8).translate(0, 0.65, 0);
+    const p = this.pts;
+    for (let i = 0; i < p.length; i++) {
+      const a = p[i];
+      const b = p[(i + 1) % p.length];
+      const len = a.distanceTo(b);
+      const yaw = Math.atan2(b.x - a.x, b.y - a.y);
+      const mid = new THREE.Vector3((a.x + b.x) / 2, 0, (a.y + b.y) / 2);
+      const pane = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.1, len), glass);
+      pane.position.copy(mid).setY(0.6);
+      pane.rotation.y = yaw;
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.06, len), steel);
+      rail.position.copy(mid).setY(1.2);
+      rail.rotation.y = yaw;
+      rail.castShadow = true;
+      this.group.add(pane, rail);
+      const posts = Math.max(1, Math.round(len / 2.4));
+      for (let k = 0; k < posts; k++) {
+        const t = k / posts;
+        const post = new THREE.Mesh(postGeo, steel);
+        post.position.set(a.x + (b.x - a.x) * t, 0, a.y + (b.y - a.y) * t);
+        post.castShadow = true;
+        this.group.add(post);
+      }
+    }
+  }
+
   /** A watering hole with a sandy shore and a few reeds. */
   private addPond(x: number, z: number, r: number): void {
     const wobbly = (radius: number, seed: number) => {
@@ -213,15 +301,16 @@ export class Enclosure {
       return geo.rotateX(-Math.PI / 2);
     };
     const seed = this.rng.next() * 10;
-    const shore = new THREE.Mesh(wobbly(r + 1.1, seed), shoreMat);
+    const icy = this.def.icy === true;
+    const shore = new THREE.Mesh(wobbly(r + 1.1, seed), icy ? iceShoreMat : shoreMat);
     shore.position.set(x, 0.03, z);
-    const water = new THREE.Mesh(wobbly(r, seed), waterMat);
+    const water = new THREE.Mesh(wobbly(r, seed), icy ? deepWaterMat : waterMat);
     water.position.set(x, 0.05, z);
     shore.receiveShadow = water.receiveShadow = true;
     this.group.add(shore, water);
 
     const reedMat = new THREE.MeshStandardMaterial({ color: '#4f7a33', roughness: 1 });
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0; i < (icy ? 0 : 26); i++) {
       const a = this.rng.next() * Math.PI * 2;
       const d = r * (0.95 + this.rng.next() * 0.25);
       const h = 0.6 + this.rng.next() * 0.8;
@@ -230,7 +319,8 @@ export class Enclosure {
       reed.rotation.set((this.rng.next() - 0.5) * 0.3, 0, (this.rng.next() - 0.5) * 0.3);
       this.group.add(reed);
     }
-    this.obstacles.push({ x, z, r: r * 1.12, solid: true });
+    this.obstacles.push({ x, z, r: r * 1.12, solid: true, water: true });
+    this.pond = { x, z, r };
   }
 
   /** A small cluster of rounded boulders. */

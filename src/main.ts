@@ -69,7 +69,7 @@ withSeededRandom('tiny-zoo:plants', () =>
     // No plants on paths, along fences, or on rocks and ponds inside enclosures.
     (x, z) =>
       isPath(x, z, 0.8) ||
-      enclosures.some((e) => (e.contains(x, z) ? !e.walkable(x, z, 1) : e.occupies(x, z, 1.2))),
+      enclosures.some((e) => (e.contains(x, z) ? e.icy || !e.walkable(x, z, 1) : e.occupies(x, z, 1.2))),
     (x, z) => enclosures.some((e) => e.contains(x, z)),
   ),
 );
@@ -233,6 +233,7 @@ function catchUp(nowMs: number): void {
 }
 
 function step(dt: number, hour: number): void {
+  for (const e of enclosures) e.feedingNow = keepers.feedingAt(e.name) !== null;
   for (const a of animals) a.update(dt, hour);
   crowd.update(dt, hour);
   keepers.update(dt);

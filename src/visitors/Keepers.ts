@@ -27,6 +27,18 @@ function foodItem(feeder: Feeder): THREE.Object3D {
       g.add(t);
     }
     g.add(bale);
+  } else if (feeder.food === 'fish') {
+    const bucket = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.2, 0.16, 0.32, 12),
+      new THREE.MeshStandardMaterial({ color: '#4f8fdc', roughness: 0.5 }),
+    );
+    const fish = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 8, 6).scale(0.6, 0.5, 2),
+      new THREE.MeshStandardMaterial({ color: '#b9c6cf', roughness: 0.3, metalness: 0.5 }),
+    );
+    fish.position.set(0, 0.2, 0);
+    fish.rotation.x = -0.6;
+    g.add(bucket, fish);
   } else {
     const bucket = new THREE.Mesh(
       new THREE.CylinderGeometry(0.2, 0.16, 0.32, 12),

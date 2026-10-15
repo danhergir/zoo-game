@@ -3,7 +3,7 @@ import type { Enclosure } from './enclosure';
 import type { Rng } from './rng';
 import { mergeChildren } from './merge';
 
-export type FoodType = 'hay' | 'meat';
+export type FoodType = 'hay' | 'meat' | 'fish';
 
 export interface FeederDef {
   name: string;
@@ -66,6 +66,17 @@ export class Feeder {
         stick.position.set(Math.cos(a) * d, 0.6 + Math.random() * 0.15, Math.sin(a) * d);
         stick.rotation.set(Math.PI / 2 + (Math.random() - 0.5), Math.random() * Math.PI, 0);
         this.foodMesh.add(stick);
+      }
+    } else if (def.food === 'fish') {
+      // A heap of silvery fish.
+      const fishMat = new THREE.MeshStandardMaterial({ color: '#b9c6cf', roughness: 0.3, metalness: 0.5 });
+      for (let i = 0; i < 14; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const d = Math.random() * r * 0.65;
+        const fish = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6).scale(0.6, 0.5, 1.8), fishMat);
+        fish.position.set(Math.cos(a) * d, 0.35 + Math.random() * 0.2, Math.sin(a) * d);
+        fish.rotation.set(Math.random() - 0.5, Math.random() * Math.PI, 0);
+        this.foodMesh.add(fish);
       }
     } else {
       const meat = new THREE.MeshStandardMaterial({ color: '#b2423a', roughness: 0.6 });

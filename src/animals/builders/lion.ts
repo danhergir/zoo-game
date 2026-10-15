@@ -58,5 +58,5 @@ export function buildLion(male: boolean): AnimalModel {
   );
 
   root.add(hitbox(1.2, 1.9, 2.4, 0.95));
-  return { root, pose, head, legs, tail, trunk: [], neck: [], ears: [], legLength: L, height: L + 1.15, eatPitch: 0.95 };
+  return { root, pose, head, legs, tail, trunk: [], neck: [], flippers: [], ears: [], legLength: L, height: L + 1.15, eatPitch: 0.95 };
 }

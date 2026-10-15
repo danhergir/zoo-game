@@ -27,6 +27,10 @@ export interface AnimalModel {
   trunk: THREE.Group[];
   /** Neck segments, base first (giraffe); bend them forward with rotation.x > 0. */
   neck: THREE.Group[];
+  /** Flipper pivots (penguins), left then right; rotation.z spreads them. */
+  flippers: THREE.Group[];
+  /** Rocks side to side when walking (penguins). */
+  waddle?: boolean;
   /** Pivots that flap (elephant ears), with their resting yaw. */
   ears: { pivot: THREE.Group; rest: number }[];
   legLength: number;

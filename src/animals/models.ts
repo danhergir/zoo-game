@@ -2,6 +2,7 @@ import { mergeRig } from '../merge';
 import { buildElephant } from './builders/elephant';
 import { buildGiraffe } from './builders/giraffe';
 import { buildLion } from './builders/lion';
+import { buildPenguin } from './builders/penguin';
 import { buildZebra } from './builders/zebra';
 import type { AnimalModel } from './rig';
 import type { SpeciesId } from './species';
@@ -17,6 +18,7 @@ const BUILDERS: Record<SpeciesId, (male: boolean) => AnimalModel> = {
   elephant: () => buildElephant(),
   lion: (male) => buildLion(male),
   giraffe: () => buildGiraffe(),
+  penguin: () => buildPenguin(),
 };
 
 export function buildModel(species: SpeciesId, male: boolean): AnimalModel {

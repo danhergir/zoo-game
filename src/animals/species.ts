@@ -1,6 +1,6 @@
 import type { FoodType } from '../feeder';
 
-export type SpeciesId = 'zebra' | 'elephant' | 'lion' | 'giraffe';
+export type SpeciesId = 'zebra' | 'elephant' | 'lion' | 'giraffe' | 'penguin';
 
 export interface SpeciesDef {
   id: SpeciesId;
@@ -26,6 +26,12 @@ export interface SpeciesDef {
   curiosity: number;
   /** Chance to wander over and eat leaves from a tree when it has nothing to do. */
   browse?: number;
+  /** Can swim in the pond; the number is the chance to go for a swim when idle. */
+  swim?: number;
+  /** Sleeps huddled together at the enclosure's huddle spot. */
+  huddles?: boolean;
+  /** Come running when a keeper starts feeding. */
+  parade?: boolean;
   names: string[];
 }
 
@@ -75,6 +81,24 @@ export const SPECIES: Record<SpeciesId, SpeciesDef> = {
     curiosity: 0.5,
     browse: 0.35,
     names: ['Gigi', 'Stretch', 'Twiga', 'Jaffa', 'Kito', 'Zarafa', 'Masai'],
+  },
+  penguin: {
+    id: 'penguin',
+    label: 'Penguin',
+    food: 'fish',
+    speed: 1.4,
+    radius: 0.45,
+    hungerRate: 0.006,
+    eatRate: 0.2,
+    portion: 10,
+    tireRate: 0.005,
+    hungryAt: 0.45,
+    idleChance: 0.3,
+    curiosity: 0.45,
+    swim: 0.45,
+    huddles: true,
+    parade: true,
+    names: ['Pingu', 'Waddles', 'Flipper', 'Tux', 'Skipper', 'Rico', 'Kowalski', 'Pebbles', 'Mumble', 'Gloria'],
   },
   lion: {
     id: 'lion',

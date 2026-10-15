@@ -81,5 +81,5 @@ export function buildElephant(): AnimalModel {
   );
 
   root.add(hitbox(2.4, 3.6, 4.0, 1.8));
-  return { root, pose, head, legs, tail, trunk, neck: [], ears, legLength: L, height: L + 2.1, eatPitch: 0.3 };
+  return { root, pose, head, legs, tail, trunk, neck: [], flippers: [], ears, legLength: L, height: L + 2.1, eatPitch: 0.3 };
 }

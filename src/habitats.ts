@@ -142,6 +142,36 @@ export const HABITATS: HabitatDef[] = [
       treat: 'leaves',
     },
   },
+  {
+    // North-east of the east wing: an icy shore around a big pool, behind glass.
+    enclosure: {
+      name: 'Penguin Point',
+      points: [[27, -36.5], [70, -36.5], [84, -58], [64, -86], [30, -80]],
+      groundColor: '#d9e3e8',
+      rocks: 7,
+      trees: 0,
+      keepClear: [[48, -39, 3]],
+      pond: [56, -62, 11],
+      glass: true,
+      icy: true,
+      huddle: [37, -52],
+    },
+    feeder: { food: 'fish', position: [48, -39], capacity: 90, radius: 1.0 },
+    species: 'penguin',
+    count: 8,
+    males: 4,
+    deck: {
+      x: 48,
+      z: -34.25,
+      w: 8,
+      d: 3.5,
+      spots: [44.6, 46, 50, 51.4].map((x) => ({ x, z: -35.5, yaw: FACE_NORTH })),
+      feedSpot: { x: 48, z: -35.7, yaw: FACE_NORTH },
+      // Penguins are small: four of them fit along the glass.
+      animalSpots: [44.6, 46, 50, 51.4].map((x) => ({ x, z: -37.4, yaw: FACE_SOUTH })),
+      treat: null,
+    },
+  },
 ];
 
 /** Viewing decks, one per habitat. */

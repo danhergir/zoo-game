@@ -7,7 +7,17 @@ import type { Rng } from '../rng';
 import { buildModel, poseLegs, type AnimalModel } from './models';
 import type { SpeciesDef } from './species';
 
-export type AnimalState = 'idle' | 'wander' | 'toFeeder' | 'eat' | 'sleep' | 'toFence' | 'greet' | 'toTree' | 'browse';
+export type AnimalState =
+  | 'idle'
+  | 'wander'
+  | 'toFeeder'
+  | 'eat'
+  | 'sleep'
+  | 'toBed'
+  | 'toFence'
+  | 'greet'
+  | 'toTree'
+  | 'browse';
 
 const STATE_LABEL: Record<AnimalState, string> = {
   idle: 'Relaxing',
@@ -15,6 +25,7 @@ const STATE_LABEL: Record<AnimalState, string> = {
   toFeeder: 'Heading to food',
   eat: 'Eating',
   sleep: 'Sleeping',
+  toBed: 'Off to the huddle',
   toFence: 'Coming to see the visitors',
   greet: 'Saying hello to visitors',
   toTree: 'Heading to a tree',
@@ -75,6 +86,9 @@ export class Animal {
   private treatTime = 0;
   /** Tree being browsed (giraffes). */
   private tree: { x: number; z: number } | null = null;
+  /** Swimmers: seconds until the next dive, and how long the current dive lasts. */
+  private diveIn = 0;
+  private diveTime = 0;
 
   private readonly bubbleEl = document.createElement('div');
   private readonly bubble: CSS2DObject;
@@ -129,9 +143,21 @@ export class Animal {
     this.roared = false;
     this.treatTime = 0;
     this.tree = null;
+    this.diveIn = 0;
+    this.diveTime = 0;
     this.state = 'sleep';
     this.stateTime = 0;
     this.moveTime = 0;
+  }
+
+  /** Can this animal go into the pond? */
+  get swims(): boolean {
+    return this.species.swim !== undefined;
+  }
+
+  /** In the water right now (penguins swimming). */
+  get swimming(): boolean {
+    return this.swims && this.enclosure.inWater(this.root.position.x, this.root.position.z);
   }
 
   get position(): THREE.Vector3 {
@@ -166,6 +192,7 @@ export class Animal {
       case 'toFeeder':
       case 'toFence':
       case 'toTree':
+      case 'toBed':
         this.walk(dt, hour);
         break;
       case 'browse':
@@ -204,7 +231,7 @@ export class Animal {
   /** Called by the separation pass; keeps the animal inside its fence. */
   nudge(dx: number, dz: number): void {
     const p = this.root.position;
-    if (this.enclosure.walkable(p.x + dx, p.z + dz, this.radius)) {
+    if (this.enclosure.walkable(p.x + dx, p.z + dz, this.radius, this.swims)) {
       p.x += dx;
       p.z += dz;
     }
@@ -239,8 +266,13 @@ export class Animal {
       this.goToFeeder();
       return;
     }
+    // Feeding time: penguins waddle over as soon as the keeper starts tossing fish.
+    if (this.species.parade && this.enclosure.feedingNow && INTERRUPTIBLE.includes(s) && this.hunger < 0.9) {
+      this.goToFeeder();
+      return;
+    }
     if (INTERRUPTIBLE.includes(s) && this.isBedtime(hour) && this.hunger > 0.25) {
-      this.setState('sleep');
+      this.goToSleep();
     }
   }
 
@@ -249,13 +281,17 @@ export class Animal {
     if (this.hunger < s.hungryAt && this.feeder.hasFood) {
       this.goToFeeder();
     } else if (this.isBedtime(hour) && this.hunger > 0.25) {
-      this.setState('sleep');
+      this.goToSleep();
     } else if (this.energy < 0.15) {
       this.setState('sleep');
     } else if (this.enclosure.audience > 0 && this.rng.next() < s.curiosity && this.claimFenceSpot()) {
       // Walking over to see the visitors.
     } else if (s.browse && this.enclosure.trees.length && this.rng.chance(s.browse) && this.goToTree()) {
       // Off to eat leaves.
+    } else if (s.swim && this.enclosure.pond && this.rng.chance(s.swim)) {
+      // A swim: somewhere in the pond.
+      this.enclosure.pondPoint(this.rng, this.target);
+      this.setState('wander');
     } else if (this.rng.next() < s.idleChance) {
       this.setState('idle', this.rng.float(3, 9));
     } else {
@@ -267,6 +303,19 @@ export class Animal {
   private goToFeeder(): void {
     this.feeder.approachPoint(this.radius, this.enclosure, this.rng, this.target);
     this.setState('toFeeder');
+  }
+
+  /** Huddlers walk to the group's sleeping spot first; everyone else sleeps where they are. */
+  private goToSleep(): void {
+    const h = this.enclosure.huddle;
+    if (!this.species.huddles || !h) {
+      this.setState('sleep');
+      return;
+    }
+    const a = this.rng.float(0, Math.PI * 2);
+    const r = this.rng.float(0.3, 1.8);
+    this.target.set(h.x + Math.cos(a) * r, 0, h.z + Math.sin(a) * r);
+    this.setState('toBed');
   }
 
   /** Pick a tree and a spot under its crown to browse from. */
@@ -331,8 +380,8 @@ export class Animal {
     this.state = state;
     this.stateTime = duration;
     this.moveTime = 0;
-    if (state === 'wander' || state === 'toFeeder' || state === 'toFence' || state === 'toTree') {
-      this.path = this.enclosure.findPath(this.root.position, this.target, this.radius) ?? [this.target.clone()];
+    if (state === 'wander' || state === 'toFeeder' || state === 'toFence' || state === 'toTree' || state === 'toBed') {
+      this.path = this.enclosure.findPath(this.root.position, this.target, this.radius, this.swims) ?? [this.target.clone()];
     }
   }
 
@@ -356,6 +405,7 @@ export class Animal {
       if (this.state === 'toFeeder' && arrived && dist < 1.5) this.setState('eat');
       else if (this.state === 'toFence' && arrived && dist < 1) this.setState('greet', this.rng.float(8, 15));
       else if (this.state === 'toTree' && arrived && dist < 1) this.setState('browse', this.rng.float(6, 12));
+      else if (this.state === 'toBed') this.setState('sleep');
       else this.setState('idle', this.rng.float(1, 4));
       return;
     }
@@ -366,10 +416,11 @@ export class Animal {
     let diff = Math.abs(desired - this.yaw) % (Math.PI * 2);
     if (diff > Math.PI) diff = Math.PI * 2 - diff;
     const hurry = this.state === 'toFeeder' && this.hunger < 0.2 ? 1.6 : 1;
-    const step = this.species.speed * hurry * Math.max(0, Math.cos(diff)) * Math.min(1, dist) * dt;
+    const swimBoost = this.swimming ? 2.6 : 1;
+    const step = this.species.speed * hurry * swimBoost * Math.max(0, Math.cos(diff)) * Math.min(1, dist) * dt;
     const nx = p.x + Math.sin(this.yaw) * step;
     const nz = p.z + Math.cos(this.yaw) * step;
-    if (this.enclosure.walkable(nx, nz, this.radius)) {
+    if (this.enclosure.walkable(nx, nz, this.radius, this.swims)) {
       p.x = nx;
       p.z = nz;
     } else if (!this.slide(nx - p.x, nz - p.z, dx, dz) && diff < 0.3) {
@@ -386,7 +437,7 @@ export class Animal {
    */
   private slide(mx: number, mz: number, tx: number, tz: number): boolean {
     const p = this.root.position;
-    const o = this.enclosure.obstacleAt(p.x + mx, p.z + mz, this.radius);
+    const o = this.enclosure.obstacleAt(p.x + mx, p.z + mz, this.radius, this.swims);
     if (!o) return false;
     const step = Math.hypot(mx, mz);
     let nx = p.x - o.x;
@@ -404,7 +455,7 @@ export class Animal {
     // Ease slightly outward too, so the animal doesn't grind along the edge.
     const mxs = (sx + nx * 0.25) * step;
     const mzs = (sz + nz * 0.25) * step;
-    if (!this.enclosure.walkable(p.x + mxs, p.z + mzs, this.radius)) return false;
+    if (!this.enclosure.walkable(p.x + mxs, p.z + mzs, this.radius, this.swims)) return false;
     p.x += mxs;
     p.z += mzs;
     this.yaw = lerpAngle(this.yaw, Math.atan2(mxs, mzs), 0.15);
@@ -432,16 +483,44 @@ export class Animal {
     const eating = this.state === 'eat';
     const greeting = this.state === 'greet';
     const browsing = this.state === 'browse';
-    if (!(this.state === 'wander' || this.state === 'toFeeder' || this.state === 'toFence' || this.state === 'toTree')) {
+    if (!['wander', 'toFeeder', 'toFence', 'toTree', 'toBed'].includes(this.state)) {
       this.walking = false;
     }
 
     this.root.rotation.y = this.yaw;
 
-    poseLegs(m, k, asleep ? 'lie' : this.walking ? 'walk' : 'stand', this.stride);
+    // Penguins sleep standing up; in the water everyone tucks their legs.
+    const swimming = this.swimming;
+    const lying = asleep && !this.species.huddles;
+    poseLegs(m, k, lying || swimming ? 'lie' : this.walking ? 'walk' : 'stand', this.stride);
 
+    // Swimmers dive now and then: under for a moment, then back up.
+    if (swimming) {
+      this.diveIn -= dt;
+      this.diveTime = Math.max(0, this.diveTime - dt);
+      if (this.diveIn <= 0) {
+        this.diveIn = this.rng.float(4, 10);
+        this.diveTime = this.rng.float(1, 2.2);
+      }
+    }
     const bob = this.walking ? Math.abs(Math.sin(this.stride)) * 0.05 * L : 0;
-    m.pose.position.y = lerp(m.pose.position.y, asleep ? -L * 0.85 : bob, asleep ? k * 0.3 : k);
+    let poseY = lying ? -L * 0.85 : bob;
+    if (swimming) poseY = this.diveTime > 0 ? -0.5 : -0.12 + Math.sin(this.time * 3) * 0.03;
+    m.pose.position.y = lerp(m.pose.position.y, poseY, asleep ? k * 0.3 : k);
+    // Swimming: body flat in the water. Waddling: rock side to side.
+    m.pose.rotation.x = lerp(m.pose.rotation.x, swimming ? 1.35 : 0, k);
+    const waddle = m.waddle && this.walking && !swimming ? Math.sin(this.stride) * 0.16 : 0;
+    m.pose.rotation.z = lerp(m.pose.rotation.z, waddle, k);
+    m.flippers.forEach((f, i) => {
+      const side = i === 0 ? 1 : -1;
+      let spread = 0.18;
+      let stroke = 0;
+      if (swimming) [spread, stroke] = [0.55, Math.sin(this.time * 9) * 0.8];
+      else if (this.walking) spread = 0.35 + Math.sin(this.stride * 2) * 0.08;
+      else if (this.state === 'eat' || this.state === 'greet') spread = 0.3 + Math.abs(Math.sin(this.time * 6)) * 0.25; // excited flapping
+      f.rotation.z = lerp(f.rotation.z, side * spread, k);
+      f.rotation.x = lerp(f.rotation.x, stroke, k);
+    });
 
     // Head: look around when idle, dip when eating, rest when asleep.
     this.lookTimer -= dt;

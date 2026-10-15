@@ -89,5 +89,5 @@ export function buildGiraffe(): AnimalModel {
 
   root.add(hitbox(1.3, 5.4, 2.4, 2.7));
   // Head height at rest: about L + 0.7 + 4 * 0.6, leaning forward.
-  return { root, pose, head, legs, tail, trunk: [], neck, ears: [], legLength: L, height: L + 3.4, eatPitch: 0.55 };
+  return { root, pose, head, legs, tail, trunk: [], neck, flippers: [], ears: [], legLength: L, height: L + 3.4, eatPitch: 0.55 };
 }

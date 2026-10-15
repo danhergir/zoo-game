@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Animal } from '../animals/Animal';
-import { BOULEVARD_Z, DECKS, EXIT_X, PLAZA, SEATS, type Spot } from '../layout';
+import { BOULEVARD_Z, DECKS, EXIT_X, LAGOON, LAGOON_SPOTS, PLAZA, SEATS, type Spot } from '../layout';
 import { Rng } from '../rng';
 import { Visitor, type Activity } from './Visitor';
 
@@ -120,6 +120,11 @@ export class Crowd {
     const a = v.activity;
     if (a?.kind !== 'view') return;
     const animals = this.hooks.animals.filter((x) => x.enclosure.name === a.enclosure);
+    // The lagoon's fish are always out: plenty to get excited about.
+    if (!animals.length) {
+      if (this.rng.chance(0.35)) v.celebrate();
+      return;
+    }
     const visible = animals.filter((x) => x.state !== 'sleep' && x.position.distanceTo(v.position) < 26);
     const mood = animals.reduce((s, x) => s + x.happiness, 0) / animals.length;
     if (visible.length > 0 && mood > 0.75) v.celebrate();
@@ -187,6 +192,10 @@ export class Crowd {
       for (const spot of d.spots) {
         if (!this.taken.has(spot)) options.push({ activity: { kind: 'view', spot, enclosure: d.enclosure }, weight });
       }
+    }
+    // The reef lagoon's glass is a popular spot.
+    for (const spot of LAGOON_SPOTS) {
+      if (!this.taken.has(spot)) options.push({ activity: { kind: 'view', spot, enclosure: LAGOON.name }, weight: 1.5 });
     }
     let r = this.rng.next() * options.reduce((s, o) => s + o.weight, 0);
     for (const o of options) {

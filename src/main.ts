@@ -4,10 +4,11 @@ import { Animal } from './animals/Animal';
 import { SPECIES } from './animals/species';
 import { CameraRig } from './camera';
 import { DAY_SECONDS, HOUR_SECONDS, RESET_HOUR, lastReset, zooTime } from './clock';
+import { Lagoon } from './lagoon';
 import { Enclosure } from './enclosure';
 import { Feeder } from './feeder';
 import { HABITATS } from './habitats';
-import { DECKS, isPath } from './layout';
+import { DECKS, LAGOON, isPath } from './layout';
 import { Picker } from './picking';
 import { ReverseZoo } from './reverse';
 import { Rng, withSeededRandom } from './rng';
@@ -63,6 +64,9 @@ for (const h of HABITATS) {
     animals.push(animal);
   }
 }
+
+const lagoon = new Lagoon(LAGOON.x, LAGOON.z);
+world.scene.add(lagoon.group);
 
 withSeededRandom('tiny-zoo:plants', () =>
   world.decorate(
@@ -258,8 +262,12 @@ window.addEventListener('resize', () => {
 
 hud.toast('Welcome! Click an animal to see how it’s doing.', 'good');
 
+/** Shared zoo time in seconds, continuous across days (drives the lagoon's fish and other ambient life). */
+const zooSeconds = () => ((simReset % 1000) + 1000) % 1000 * DAY_SECONDS + simSteps * SIM_STEP;
+
 function frame(dt: number): void {
   for (const f of feeders) f.syncVisuals();
+  lagoon.update(zooSeconds());
   const selected = inspector.selected;
   if (selected) {
     ring.position.set(selected.position.x, 0.05, selected.position.z);

@@ -349,6 +349,12 @@ export class Visitor {
     const groundDrop = (0.1 - m.hipHeight * s) / s;
     m.pose.position.y = lerp(m.pose.position.y, resting ? groundDrop : sitting ? sitDrop : bob + hop, k);
     m.pose.position.z = lerp(m.pose.position.z, sitting ? -0.12 : this.startleTime > 0 ? -0.45 : 0, k);
+    // Kids at aquarium glass lean in with their hands on it.
+    const pressing = this.child && this.phase === 'busy' && this.activity?.kind === 'view' && this.activity.spot.glass === true;
+    m.pose.rotation.x = lerp(m.pose.rotation.x, pressing ? 0.22 : 0, k);
+    if (pressing && !this.gesture && !this.offering) {
+      m.shoulders.forEach((sh) => (sh.rotation.x = lerp(sh.rotation.x, -1.55, k)));
+    }
 
     m.head.rotation.y = this.phase === 'busy' && !sitting && !resting ? Math.sin(this.time * 0.7) * 0.35 : 0;
   }

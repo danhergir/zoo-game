@@ -11,6 +11,8 @@ export interface Spot {
   z: number;
   /** Facing direction (rotation.y). */
   yaw: number;
+  /** Right up against aquarium glass (kids press their hands to it). */
+  glass?: boolean;
 }
 
 /** Path rectangles as [x, z, width, depth]. */
@@ -20,7 +22,19 @@ export const PATH_RECTS: [number, number, number, number][] = [
   [7.4, 26, 5.8, 1.6], // staff path from the keeper hut to the avenue
   [-48.5, -29.5, 79, 6], // west wing
   [48.5, -29.5, 79, 6], // east wing
+  [84, -24.25, 5, 4.6], // from the east wing up to the reef lagoon
 ];
+
+/** The reef lagoon: a round glass-walled tank with a walkway around it. */
+export const LAGOON = { x: 84, z: -6, r: 13, walk: 3.6, name: 'Reef Lagoon' };
+
+/** Where visitors stand at the lagoon glass, facing in (skipping the entrance side). */
+export const LAGOON_SPOTS: Spot[] = Array.from({ length: 18 }, (_, i) => -Math.PI / 2 + ((i + 1) * Math.PI * 2) / 20)
+  .map((a) => {
+    const x = LAGOON.x + Math.cos(a) * (LAGOON.r + 0.65);
+    const z = LAGOON.z + Math.sin(a) * (LAGOON.r + 0.65);
+    return { x, z, yaw: Math.atan2(LAGOON.x - x, LAGOON.z - z), glass: true };
+  });
 
 /** Keepers' hut beside the gate; they come and go through its door. */
 export const STAFF_HUT = { x: 12.6, z: 26, w: 4, d: 3.2 };
@@ -50,6 +64,11 @@ export const LAMPS: [number, number][] = [
   ...[-16, -4, 8, 20].flatMap((z): [number, number][] => [
     [5.4, z],
     [-5.4, z],
+  ]),
+  // Around the reef lagoon.
+  ...[0.25, 0.75, 1.25, 1.75].map((f): [number, number] => [
+    LAGOON.x + Math.cos(f * Math.PI) * (LAGOON.r + LAGOON.walk + 0.5),
+    LAGOON.z + Math.sin(f * Math.PI) * (LAGOON.r + LAGOON.walk + 0.5),
   ]),
   // Along the wings, alternating sides.
   ...[-80, -64, -48, -32, -18, 18, 32, 48, 64, 80].map((x, i): [number, number] => [x, i % 2 ? -26.1 : -32.9]),
@@ -86,6 +105,12 @@ const NODES: [number, number][] = [
   [-WING_END_X, WING_Z], // 15 west wing end
   [9, WING_Z], // 16 east wing start
   [WING_END_X, WING_Z], // 17 east wing end
+  [LAGOON.x, WING_Z], // 18 east wing / lagoon junction
+  // 19..30: ring around the lagoon walkway, starting at the entrance (south side, facing the wing)
+  ...Array.from({ length: 12 }, (_, k): [number, number] => [
+    LAGOON.x + Math.cos(-Math.PI / 2 + (k * Math.PI) / 6) * (LAGOON.r + LAGOON.walk / 2),
+    LAGOON.z + Math.sin(-Math.PI / 2 + (k * Math.PI) / 6) * (LAGOON.r + LAGOON.walk / 2),
+  ]),
 ];
 
 /** [a, b, path width]. */
@@ -100,7 +125,10 @@ const EDGES: [number, number, number][] = [
   [10, 14, 5], // ring west -> west wing
   [14, 15, 6],
   [6, 16, 5], // ring east -> east wing
-  [16, 17, 6],
+  [16, 18, 6],
+  [18, 17, 6],
+  [18, 19, 4.6], // up to the lagoon walkway
+  ...Array.from({ length: 12 }, (_, k): [number, number, number] => [19 + k, 19 + ((k + 1) % 12), LAGOON.walk]),
 ];
 
 const laneScale = (width: number) => Math.min(1, Math.max(0, (width / 2 - 0.7) / 2.6));
@@ -204,5 +232,6 @@ export function isPath(x: number, z: number, margin = 0): boolean {
   for (const k of [...DECKS, STAFF_HUT]) {
     if (Math.abs(x - k.x) < k.w / 2 + margin && Math.abs(z - k.z) < k.d / 2 + margin) return true;
   }
+  if (Math.hypot(x - LAGOON.x, z - LAGOON.z) < LAGOON.r + LAGOON.walk + margin) return true;
   return Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.r + margin;
 }

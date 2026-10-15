@@ -138,6 +138,27 @@ function eyes(b: Builder, x: number, y: number, z: number, r: number): THREE.Mes
   ];
 }
 
+/**
+ * Leg pose for a walk cycle (diagonal pairs, knees lifting on the forward
+ * swing), standing, or lying down with front legs tucked. `k` is the blend factor.
+ */
+export function poseLegs(m: AnimalModel, k: number, mode: 'stand' | 'walk' | 'lie', stride: number): void {
+  m.legs.forEach((leg, i) => {
+    const phase = stride + (i === 0 || i === 3 ? 0 : Math.PI);
+    let hip = 0;
+    let knee = 0;
+    if (mode === 'lie') {
+      hip = leg.front ? -1.4 : 1.4;
+      knee = leg.front ? 1.7 : 0;
+    } else if (mode === 'walk') {
+      hip = Math.sin(phase) * 0.45;
+      knee = Math.max(0, -Math.cos(phase)) * 0.9;
+    }
+    leg.hip.rotation.x = THREE.MathUtils.lerp(leg.hip.rotation.x, hip, k);
+    leg.knee.rotation.x = THREE.MathUtils.lerp(leg.knee.rotation.x, knee, k);
+  });
+}
+
 export function buildModel(species: SpeciesId, male: boolean): AnimalModel {
   const model =
     species === 'zebra' ? buildZebra() : species === 'elephant' ? buildElephant() : buildLion(male);

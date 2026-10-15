@@ -51,7 +51,7 @@ export class Keepers {
   private readonly assigned = new Map<Feeder, Visitor>();
 
   constructor(
-    private readonly scene: THREE.Scene,
+    private readonly scene: THREE.Object3D,
     private readonly feeders: { feeder: Feeder; enclosure: string }[],
   ) {}
 

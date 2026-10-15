@@ -32,7 +32,7 @@ export class Crowd {
   private spawnTimer = 0;
 
   constructor(
-    private readonly scene: THREE.Scene,
+    private readonly scene: THREE.Object3D,
     private readonly hooks: CrowdHooks,
   ) {}
 

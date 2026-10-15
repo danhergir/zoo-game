@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Feeder } from '../feeder';
-import { BOULEVARD_Z, type Spot } from '../layout';
+import { routeAlongPaths, type Spot } from '../layout';
 import { buildPerson, type PersonModel } from './person';
 
 export type Activity =
@@ -8,6 +8,7 @@ export type Activity =
   | { kind: 'sit'; spot: Spot }
   | { kind: 'stroll'; spot: Spot }
   | { kind: 'feed'; spot: Spot; feeder: Feeder }
+  | { kind: 'rest'; spot: Spot }
   | { kind: 'exit'; spot: Spot };
 
 type Phase = 'walking' | 'busy' | 'leaving' | 'done';
@@ -38,10 +39,6 @@ function lerpAngle(a: number, b: number, t: number): number {
   if (d < -Math.PI) d += Math.PI * 2;
   return a + d * t;
 }
-
-/** Avenue section visitors walk along, between the gate and the plaza. */
-const SPINE_MIN_Z = -18;
-const SPINE_MAX_Z = 29.5;
 
 /**
  * One person walking the zoo: a guest, or a keeper on a feeding run. Walks
@@ -178,24 +175,21 @@ export class Visitor {
     this.animate(dt);
   }
 
-  /**
-   * Route along the walkable network: boulevard <-> gate <-> avenue spine <-> target.
-   * Every leg is a straight line that stays on paths, decks or the plaza.
-   */
+  /** Walk the zoo's paths to `to` (see routeAlongPaths). */
   private planRoute(to: Spot): void {
-    const from = this.root.position;
-    const lane = this.lane;
-    const bz = BOULEVARD_Z + lane * 0.7;
-    const onBoulevard = (z: number) => z > SPINE_MAX_Z;
-    const pts: [number, number][] = [];
-    if (onBoulevard(from.z)) pts.push([from.x, bz], [lane, bz]);
-    else pts.push([lane, clamp(from.z, SPINE_MIN_Z, SPINE_MAX_Z)]);
-    if (onBoulevard(to.z)) pts.push([lane, bz], [to.x, bz]);
-    else pts.push([lane, clamp(to.z, SPINE_MIN_Z, SPINE_MAX_Z)]);
-    pts.push([to.x, to.z]);
+    this.setRoute(routeAlongPaths(this.root.position, to, this.lane));
+  }
 
+  /** Walk an explicit list of waypoints, e.g. a route inside an enclosure. */
+  goVia(points: [number, number][], activity: Activity): void {
+    this.activity = activity;
+    this.phase = 'walking';
+    this.setRoute(points);
+  }
+
+  private setRoute(pts: [number, number][]): void {
     this.route.length = 0;
-    let last = from.clone();
+    let last = this.root.position.clone();
     for (const [x, z] of pts) {
       const p = new THREE.Vector3(x, 0, z);
       if (p.distanceTo(last) > 0.05) this.route.push(p);
@@ -230,7 +224,13 @@ export class Visitor {
     if (!a) return;
     this.phase = a.kind === 'exit' ? 'leaving' : 'busy';
     this.timer =
-      a.kind === 'view' ? randFloat(7, 13) : a.kind === 'sit' ? randFloat(10, 18) : a.kind === 'feed' ? 5 : randFloat(2, 5);
+      a.kind === 'view'
+        ? randFloat(7, 13)
+        : a.kind === 'sit' || a.kind === 'rest'
+          ? randFloat(10, 18)
+          : a.kind === 'feed'
+            ? 5
+            : randFloat(2, 5);
     this.onArrive?.(this);
   }
 
@@ -263,6 +263,8 @@ export class Visitor {
     const k = 1 - Math.exp(-dt * 10);
     const sitting = this.phase === 'busy' && this.activity?.kind === 'sit';
     const tossing = this.phase === 'busy' && this.activity?.kind === 'feed';
+    // Sitting on the ground, legs out in front.
+    const resting = this.phase === 'busy' && this.activity?.kind === 'rest';
     const carrying = m.carry.children.length > 0;
     const spot = this.activity?.spot;
     if (this.phase === 'busy' && spot) this.yaw = lerpAngle(this.yaw, spot.yaw, k);
@@ -271,7 +273,7 @@ export class Visitor {
     const swing = this.walking ? Math.sin(this.stride) * 0.55 : 0;
     m.hips.forEach((hip, i) => {
       const s = i === 0 ? swing : -swing;
-      hip.rotation.x = lerp(hip.rotation.x, sitting ? -1.5 : s, k);
+      hip.rotation.x = lerp(hip.rotation.x, sitting || resting ? -1.5 : s, k);
     });
     m.knees.forEach((knee, i) => {
       const phase = this.stride + (i === 0 ? 0 : Math.PI);
@@ -314,6 +316,7 @@ export class Visitor {
         z = side * 0.5;
       }
       if (sitting) x = -0.35;
+      if (resting) x = 0.45; // leaning back on the hands
       sh.rotation.x = lerp(sh.rotation.x, x, k);
       sh.rotation.z = lerp(sh.rotation.z, z, k);
     });
@@ -323,9 +326,10 @@ export class Visitor {
     const sitDrop = (0.61 - m.hipHeight * s) / s;
     const bob = this.walking ? Math.abs(Math.sin(this.stride)) * 0.04 : 0;
     const hop = this.cheer > 0 ? Math.abs(Math.sin(this.time * 9)) * 0.12 : this.startleTime > 0.5 ? 0.15 : 0;
-    m.pose.position.y = lerp(m.pose.position.y, sitting ? sitDrop : bob + hop, k);
+    const groundDrop = (0.1 - m.hipHeight * s) / s;
+    m.pose.position.y = lerp(m.pose.position.y, resting ? groundDrop : sitting ? sitDrop : bob + hop, k);
     m.pose.position.z = lerp(m.pose.position.z, sitting ? -0.12 : this.startleTime > 0 ? -0.45 : 0, k);
 
-    m.head.rotation.y = this.phase === 'busy' && !sitting ? Math.sin(this.time * 0.7) * 0.35 : 0;
+    m.head.rotation.y = this.phase === 'busy' && !sitting && !resting ? Math.sin(this.time * 0.7) * 0.35 : 0;
   }
 }

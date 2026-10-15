@@ -129,11 +129,11 @@ button {
   }
 }
 
-/* Controls help */
+/* Controls help (top-right; the bottom-right corner is the reverse-zoo hotspot) */
 .help {
   position: absolute;
   right: 12px;
-  bottom: 12px;
+  top: 12px;
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 12px;
@@ -240,6 +240,57 @@ button {
   50% {
     translate: 0 -4px;
   }
+}
+
+/* Reverse zoo: circular wipe from the bottom-right corner, and the corner's paw hint */
+.iris {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: #10162a;
+  pointer-events: none;
+  clip-path: circle(0% at 100% 100%);
+}
+
+.iris.closing {
+  animation: iris-close 0.32s ease-in forwards;
+}
+
+.iris.opening {
+  animation: iris-open 0.38s ease-out forwards;
+}
+
+@keyframes iris-close {
+  from {
+    clip-path: circle(0% at 100% 100%);
+  }
+  to {
+    clip-path: circle(150% at 100% 100%);
+  }
+}
+
+@keyframes iris-open {
+  from {
+    clip-path: circle(150% at 100% 100%);
+  }
+  to {
+    clip-path: circle(0% at 100% 100%);
+  }
+}
+
+.corner-hint {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  font-size: 20px;
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.corner-hint.active {
+  opacity: 1;
+  transform: scale(1.25) rotate(-12deg);
 }
 
 @media (max-width: 600px) {

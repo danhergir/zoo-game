@@ -8,6 +8,7 @@ import { Enclosure, type EnclosureDef } from './enclosure';
 import { Feeder, type FeederDef } from './feeder';
 import { DECKS, isPath } from './layout';
 import { Picker } from './picking';
+import { ReverseZoo } from './reverse';
 import { World } from './scene';
 import { Hud, type GameState } from './ui/hud';
 import { Inspector } from './ui/inspector';
@@ -83,6 +84,9 @@ const state: GameState = zooTime(Date.now());
 let clockOffsetMs = 0;
 const hud = new Hud(app, state);
 
+/** Everything that moves in the real zoo; hidden while the reverse zoo is showing. */
+const live = new THREE.Group();
+world.scene.add(live);
 const enclosures: Enclosure[] = [];
 const feeders: Feeder[] = [];
 const animals: Animal[] = [];
@@ -98,7 +102,7 @@ for (const h of HABITATS) {
   const names = [...species.names].sort(() => Math.random() - 0.5);
   for (let i = 0; i < h.count; i++) {
     const animal = new Animal(species, names[i % names.length], i < h.males, enclosure, feeder);
-    world.scene.add(animal.root);
+    live.add(animal.root);
     animals.push(animal);
   }
 }
@@ -140,7 +144,7 @@ function select(animal: Animal | null): void {
 new Picker(
   world.renderer.domElement,
   rig.camera,
-  () => [...animals.map((a) => a.root), ...feeders.map((f) => f.root)],
+  () => (reverse.active ? [] : [...animals.map((a) => a.root), ...feeders.map((f) => f.root)]),
   (pick) => {
     if (!pick) return select(null);
     if (pick.kind === 'animal') return select(pick.animal);
@@ -152,11 +156,62 @@ new Picker(
 );
 
 const keepers = new Keepers(
-  world.scene,
+  live,
   feeders.map((feeder, i) => ({ feeder, enclosure: HABITATS[i].enclosure.name })),
 );
-const crowd = new Crowd(world.scene, { animals, feedingAt: (name) => keepers.feedingAt(name) !== null });
+const crowd = new Crowd(live, { animals, feedingAt: (name) => keepers.feedingAt(name) !== null });
 for (const e of enclosures) e.animalSpots = DECKS.find((d) => d.enclosure === e.name)?.animalSpots ?? [];
+const reverse = new ReverseZoo(world.scene, enclosures);
+
+/**
+ * Reverse zoo: hovering the bottom-right corner flips the zoo (people in the
+ * fences, animals visiting) behind a circular wipe; leaving the corner flips back.
+ */
+const CORNER = 90;
+const iris = document.createElement('div');
+iris.className = 'iris';
+const cornerHint = document.createElement('div');
+cornerHint.className = 'corner-hint';
+cornerHint.textContent = '🐾';
+app.append(iris, cornerHint);
+let wantReverse = false;
+let flipping = false;
+
+/** Wipe durations; must match .iris.closing / .iris.opening in style.css. */
+const WIPE_CLOSE_MS = 320;
+const WIPE_OPEN_MS = 380;
+
+function flip(): void {
+  if (flipping || reverse.active === wantReverse) return;
+  flipping = true;
+  iris.className = 'iris closing';
+  // Timers rather than animationend, which never fires if CSS animations are paused or disabled.
+  setTimeout(() => {
+    reverse.active = wantReverse;
+    live.visible = !wantReverse;
+    if (wantReverse) select(null);
+    iris.className = 'iris opening';
+    setTimeout(() => {
+      iris.className = 'iris';
+      flipping = false;
+      flip(); // the pointer may have moved again meanwhile
+    }, WIPE_OPEN_MS);
+  }, WIPE_CLOSE_MS);
+}
+
+window.addEventListener('pointermove', (e) => {
+  const inCorner = e.clientX > window.innerWidth - CORNER && e.clientY > window.innerHeight - CORNER;
+  cornerHint.classList.toggle('active', inCorner);
+  if (inCorner !== wantReverse) {
+    wantReverse = inCorner;
+    flip();
+  }
+});
+document.documentElement.addEventListener('pointerleave', () => {
+  wantReverse = false;
+  cornerHint.classList.remove('active');
+  flip();
+});
 
 /** Keep animals from standing inside each other. */
 function separate(): void {
@@ -198,6 +253,7 @@ function step(dt: number): void {
   for (const a of animals) a.update(dt, state.hour);
   crowd.update(dt, state.hour);
   keepers.update(dt);
+  reverse.update(dt);
   separate();
 }
 
@@ -249,6 +305,7 @@ if (import.meta.env.DEV) {
       feeders,
       crowd,
       keepers,
+      reverse,
       world,
       rig,
       focus(name: string) {

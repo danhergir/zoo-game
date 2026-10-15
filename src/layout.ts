@@ -107,6 +107,28 @@ export const LAMPS: [number, number][] = [
   }),
 ];
 
+/** Avenue section people walk along, between the gate and the plaza. */
+const SPINE_MIN_Z = -18;
+const SPINE_MAX_Z = 29.5;
+
+/**
+ * Waypoints along the walkable network: boulevard <-> gate <-> avenue spine
+ * <-> target. Every leg is a straight line that stays on paths, decks or the
+ * plaza. `lane` (about -2.6..2.6) keeps walkers spread across the avenue.
+ */
+export function routeAlongPaths(from: { x: number; z: number }, to: { x: number; z: number }, lane: number): [number, number][] {
+  const bz = BOULEVARD_Z + lane * 0.7;
+  const onBoulevard = (z: number) => z > SPINE_MAX_Z;
+  const spineZ = (z: number) => Math.min(SPINE_MAX_Z, Math.max(SPINE_MIN_Z, z));
+  const pts: [number, number][] = [];
+  if (onBoulevard(from.z)) pts.push([from.x, bz], [lane, bz]);
+  else pts.push([lane, spineZ(from.z)]);
+  if (onBoulevard(to.z)) pts.push([lane, bz], [to.x, bz]);
+  else pts.push([lane, spineZ(to.z)]);
+  pts.push([to.x, to.z]);
+  return pts;
+}
+
 export function isPath(x: number, z: number, margin = 0): boolean {
   for (const [cx, cz, w, d] of PATH_RECTS) {
     if (Math.abs(x - cx) < w / 2 + margin && Math.abs(z - cz) < d / 2 + margin) return true;

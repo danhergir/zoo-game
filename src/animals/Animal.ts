@@ -3,7 +3,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import type { Enclosure } from '../enclosure';
 import type { Feeder } from '../feeder';
 import type { Spot } from '../layout';
-import { buildModel, type AnimalModel } from './models';
+import { buildModel, poseLegs, type AnimalModel } from './models';
 import type { SpeciesDef } from './species';
 
 export type AnimalState = 'idle' | 'wander' | 'toFeeder' | 'eat' | 'sleep' | 'toFence' | 'greet';
@@ -363,22 +363,7 @@ export class Animal {
 
     this.root.rotation.y = this.yaw;
 
-    // Legs: walk cycle with diagonal pairs; knees lift on the forward swing.
-    // Lying down, front legs tuck under and back legs stretch out.
-    m.legs.forEach((leg, i) => {
-      const phase = this.stride + (i === 0 || i === 3 ? 0 : Math.PI);
-      let hip = 0;
-      let knee = 0;
-      if (asleep) {
-        hip = leg.front ? -1.4 : 1.4;
-        knee = leg.front ? 1.7 : 0;
-      } else if (this.walking) {
-        hip = Math.sin(phase) * 0.45;
-        knee = Math.max(0, -Math.cos(phase)) * 0.9;
-      }
-      leg.hip.rotation.x = lerp(leg.hip.rotation.x, hip, k);
-      leg.knee.rotation.x = lerp(leg.knee.rotation.x, knee, k);
-    });
+    poseLegs(m, k, asleep ? 'lie' : this.walking ? 'walk' : 'stand', this.stride);
 
     const bob = this.walking ? Math.abs(Math.sin(this.stride)) * 0.05 * L : 0;
     m.pose.position.y = lerp(m.pose.position.y, asleep ? -L * 0.85 : bob, asleep ? k * 0.3 : k);

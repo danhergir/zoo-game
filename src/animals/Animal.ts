@@ -54,6 +54,7 @@ export class Animal {
   private readonly wakeTime = randFloat(5.5, 7.5);
 
   private readonly bubbleEl = document.createElement('div');
+  private readonly bubble: CSS2DObject;
   private bubbleText = '';
 
   constructor(species: SpeciesDef, name: string, male: boolean, enclosure: Enclosure, feeder: Feeder) {
@@ -73,10 +74,10 @@ export class Animal {
     this.root.userData.pick = { kind: 'animal', animal: this };
 
     this.bubbleEl.className = 'bubble';
-    this.bubbleEl.style.display = 'none';
-    const bubble = new CSS2DObject(this.bubbleEl);
-    bubble.position.y = this.model.height + 0.5;
-    this.root.add(bubble);
+    this.bubble = new CSS2DObject(this.bubbleEl);
+    this.bubble.visible = false;
+    this.bubble.position.y = this.model.height + 0.5;
+    this.root.add(this.bubble);
   }
 
   get position(): THREE.Vector3 {
@@ -339,6 +340,6 @@ export class Animal {
     if (text === this.bubbleText) return;
     this.bubbleText = text;
     this.bubbleEl.textContent = text;
-    this.bubbleEl.style.display = text ? '' : 'none';
+    this.bubble.visible = text !== '';
   }
 }

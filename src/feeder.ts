@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import type { Enclosure } from './enclosure';
+import { mergeChildren } from './merge';
 
 export type FoodType = 'hay' | 'meat';
 
@@ -90,7 +91,9 @@ export class Feeder {
     }
     for (const m of [tub, base, ...bands]) m.castShadow = m.receiveShadow = true;
     this.foodMesh.traverse((o) => (o.castShadow = true));
+    mergeChildren(this.foodMesh);
     this.root.add(tub, base, ...bands, this.foodMesh);
+    mergeChildren(this.root);
     this.root.userData.pick = { kind: 'feeder', feeder: this };
 
     this.labelEl = document.createElement('div');

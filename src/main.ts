@@ -237,17 +237,13 @@ function frame(dt: number): void {
 }
 
 const timer = new THREE.Timer();
-let accumulator = 0;
 world.renderer.setAnimationLoop((time) => {
   timer.update(time);
   // After a backgrounded tab the clock simply jumps ahead; the animals carry on from where they were.
   const dt = Math.min(timer.getDelta(), 0.1);
   syncClock();
-  accumulator += dt;
-  while (accumulator >= SIM_STEP) {
-    step(SIM_STEP);
-    accumulator -= SIM_STEP;
-  }
+  // Simulate every frame (in chunks of at most SIM_STEP) so motion matches the display's refresh rate.
+  for (let left = dt; left > 1e-6; left -= SIM_STEP) step(Math.min(left, SIM_STEP));
   frame(dt);
 });
 

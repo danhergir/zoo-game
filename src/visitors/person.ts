@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeRig } from '../merge';
 
 /** A small stylized person. Faces +Z with feet at y = 0 (before scaling). */
 export interface PersonModel {
@@ -23,15 +24,8 @@ const SHIRTS = ['#e85d5d', '#4f8fdc', '#f2c14e', '#6cc28a', '#b07ad9', '#ff9f5a'
 const PANTS = ['#2f3d5c', '#4a4a4a', '#6b5a45', '#c9b48a', '#2d5a4a', '#1f2430'];
 const HATS = ['#d9c08a', '#e85d5d', '#3a3f58', '#f5f5f0', '#4f8fdc'];
 
-const materials = new Map<string, THREE.MeshStandardMaterial>();
-function mat(color: string): THREE.MeshStandardMaterial {
-  let m = materials.get(color);
-  if (!m) {
-    m = new THREE.MeshStandardMaterial({ color, roughness: 0.85 });
-    materials.set(color, m);
-  }
-  return m;
-}
+/** One material for everyone; each part carries its color as vertex colors, so a joint merges into one mesh. */
+const personMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
 
 function pick<T>(list: T[]): T {
   return list[Math.floor(Math.random() * list.length)];
@@ -52,8 +46,15 @@ const geo = {
   backpack: new THREE.BoxGeometry(0.28, 0.32, 0.14),
 };
 
+const tint = new THREE.Color();
 function part(g: THREE.BufferGeometry, color: string, x = 0, y = 0, z = 0): THREE.Mesh {
-  const m = new THREE.Mesh(g, mat(color));
+  const geo = g.clone();
+  tint.set(color);
+  const count = geo.attributes.position.count;
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) colors.set([tint.r, tint.g, tint.b], i * 3);
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const m = new THREE.Mesh(geo, personMat);
   m.position.set(x, y, z);
   m.castShadow = true;
   return m;
@@ -111,5 +112,6 @@ export function buildPerson(child: boolean): PersonModel {
 
   const scale = child ? THREE.MathUtils.randFloat(0.58, 0.7) : THREE.MathUtils.randFloat(0.92, 1.06);
   root.scale.setScalar(scale);
+  mergeRig(root);
   return { root, pose, hips, knees, shoulders, head, hipHeight, height: 1.75 };
 }

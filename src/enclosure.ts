@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { dirtTexture, repeated } from './materials';
+import { mergeStatic } from './merge';
 
 export interface EnclosureDef {
   name: string;
@@ -58,6 +59,10 @@ export class Enclosure {
     if (def.pond) this.addPond(...def.pond);
     for (let i = 0; i < (def.rocks ?? 0); i++) this.addRock();
     for (let i = 0; i < (def.trees ?? 0); i++) this.addTree();
+    // Everything in an enclosure is static: bake it into a handful of meshes.
+    const merged = mergeStatic(this.group);
+    this.group.clear();
+    this.group.add(...merged.children);
   }
 
   contains(x: number, z: number): boolean {

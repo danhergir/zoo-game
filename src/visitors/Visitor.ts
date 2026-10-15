@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { BOULEVARD_Z, EXIT_X, type Spot } from '../layout';
 import { buildPerson, type PersonModel } from './person';
 
@@ -53,8 +52,6 @@ export class Visitor {
   private time = Math.random() * 10;
   private walking = false;
   private cheer = 0;
-  private readonly bubbleEl = document.createElement('div');
-  private bubbleTime = 0;
 
   constructor(fromRight: boolean, readonly child: boolean) {
     this.model = buildPerson(child);
@@ -64,12 +61,6 @@ export class Visitor {
     const x = fromRight ? EXIT_X : -EXIT_X;
     this.root.position.set(x, 0, BOULEVARD_Z + this.lane * 0.7);
     this.yaw = fromRight ? -Math.PI / 2 : Math.PI / 2;
-
-    this.bubbleEl.className = 'bubble visitor-bubble';
-    this.bubbleEl.style.display = 'none';
-    const bubble = new CSS2DObject(this.bubbleEl);
-    bubble.position.y = this.model.height + 0.45;
-    this.root.add(bubble);
   }
 
   get position(): THREE.Vector3 {
@@ -87,12 +78,9 @@ export class Visitor {
     this.planRoute(activity.spot);
   }
 
-  /** Show an emoji over the head for a couple of seconds. */
-  emote(text: string, excited = false): void {
-    this.bubbleEl.textContent = text;
-    this.bubbleEl.style.display = '';
-    this.bubbleTime = 2.5;
-    if (excited) this.cheer = 1.2;
+  /** Jump and wave for a moment. */
+  celebrate(): void {
+    this.cheer = 1.2;
   }
 
   update(dt: number): void {
@@ -106,10 +94,6 @@ export class Visitor {
     this.root.scale.setScalar(Math.max(0.001, this.baseScale * this.appear));
     if (leaving && this.appear === 0) this.phase = 'done';
 
-    if (this.bubbleTime > 0) {
-      this.bubbleTime -= dt;
-      if (this.bubbleTime <= 0) this.bubbleEl.style.display = 'none';
-    }
     this.cheer = Math.max(0, this.cheer - dt);
     this.animate(dt);
   }
@@ -169,10 +153,6 @@ export class Visitor {
     this.onArrive?.(this);
   }
 
-  /** Removes DOM labels; CSS2D elements aren't cleaned up when a parent leaves the scene. */
-  dispose(): void {
-    this.bubbleEl.remove();
-  }
 
   private animate(dt: number): void {
     const m = this.model;

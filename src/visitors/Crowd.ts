@@ -63,7 +63,6 @@ export class Crowd {
       const v = this.visitors[i];
       if (v.phase !== 'done') continue;
       this.scene.remove(v.root);
-      v.dispose();
       this.visitors.splice(i, 1);
     }
   }
@@ -98,17 +97,8 @@ export class Crowd {
     const animals = this.hooks.animals.filter((x) => x.enclosure.name === a.enclosure);
     const visible = animals.filter((x) => x.state !== 'sleep' && x.position.distanceTo(v.position) < 26);
     const mood = animals.reduce((s, x) => s + x.happiness, 0) / animals.length;
-    if (visible.length === 0) {
-      v.emote(animals.some((x) => x.state === 'sleep') ? '😴' : '🤷');
-      return;
-    }
-    if (mood > 0.75) v.emote(Math.random() < 0.5 ? '😍' : '🤩', true);
-    else if (mood > 0.5) v.emote('😄');
-    else if (mood > 0.3) v.emote('😐');
-    else {
-      v.emote('😢');
-      return;
-    }
+    if (visible.length === 0 || mood <= 0.3) return;
+    if (mood > 0.75) v.celebrate();
     const appeal = animals[0].species.appeal;
     const tip = Math.round(appeal * mood * (0.5 + visible.length / animals.length) * 1.5);
     if (tip > 0) this.hooks.onPay(tip, v.position);

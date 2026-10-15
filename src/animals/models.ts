@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { outlineMaterial, stripeMaterial } from '../materials';
+import { mergeRig } from '../merge';
+import { NO_AO_LAYER } from '../post';
 import type { SpeciesId } from './species';
 
 /**
@@ -72,6 +74,7 @@ class Builder {
     if (outline && this.outline > 0) {
       const hull = new THREE.Mesh(geo, outlineMaterial(this.outline));
       hull.raycast = () => {};
+      hull.layers.set(NO_AO_LAYER);
       m.add(hull);
     }
     return m;
@@ -136,14 +139,11 @@ function eyes(b: Builder, x: number, y: number, z: number, r: number): THREE.Mes
 }
 
 export function buildModel(species: SpeciesId, male: boolean): AnimalModel {
-  switch (species) {
-    case 'zebra':
-      return buildZebra();
-    case 'elephant':
-      return buildElephant();
-    case 'lion':
-      return buildLion(male);
-  }
+  const model =
+    species === 'zebra' ? buildZebra() : species === 'elephant' ? buildElephant() : buildLion(male);
+  // Merge the rigid parts of each joint so an animal costs a few draw calls, not dozens.
+  mergeRig(model.root);
+  return model;
 }
 
 let zebraMats: { body: THREE.Material; limb: THREE.Material; neck: THREE.Material } | null = null;

@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { cobbleTexture, plankTexture, repeated } from './materials';
+import { mergeStatic } from './merge';
 import { BENCHES, DECKS, GATE_Z, LAMPS, PATH_RECTS, PLAZA, isPath } from './layout';
-import { PostFX } from './post';
+import { NO_AO_LAYER, PostFX } from './post';
 
 const SKY_TOP_DAY = new THREE.Color('#5aa9e6');
 const SKY_HORIZON_DAY = new THREE.Color('#cfe9f7');
@@ -84,12 +85,13 @@ export class World {
     this.moon.position.set(-60, 120, -40);
     this.scene.add(this.sun, this.sun.target, this.hemi, this.moon);
 
-    this.scene.add(createGround(), createPaths(), createGate(), createForest());
+    this.scene.add(createGround(), mergeStatic(createPaths()), mergeStatic(createGate()), createForest());
     this.addLampsAndBenches();
   }
 
   /** Must be called once the camera exists; sets up post-processing. */
-  attachCamera(camera: THREE.Camera): void {
+  attachCamera(camera: THREE.PerspectiveCamera): void {
+    camera.layers.enable(NO_AO_LAYER);
     this.post = new PostFX(this.renderer, this.scene, camera);
     this.resize();
   }
@@ -152,6 +154,7 @@ export class World {
   }
 
   private addLampsAndBenches(): void {
+    const furniture = new THREE.Group();
     const postMat = new THREE.MeshStandardMaterial({ color: '#2f3336', roughness: 0.5, metalness: 0.4 });
     const wood = new THREE.MeshStandardMaterial({ color: '#8a5a36', roughness: 0.9 });
     const iron = new THREE.MeshStandardMaterial({ color: '#2d2d2d', roughness: 0.6 });
@@ -166,7 +169,7 @@ export class World {
       pole.castShadow = head.castShadow = true;
       lamp.add(pole, head, bulb);
       lamp.position.set(x, 0, z);
-      this.scene.add(lamp);
+      furniture.add(lamp);
       // A handful of real lights; the rest just glow.
       if (i % 2 === 0) {
         const light = new THREE.PointLight('#ffc77a', 0, 16, 1.8);
@@ -190,8 +193,9 @@ export class World {
       }
       bench.traverse((o) => (o.castShadow = true));
       bench.position.set(x, 0, z);
-      this.scene.add(bench);
+      furniture.add(bench);
     }
+    this.scene.add(mergeStatic(furniture));
   }
 }
 
@@ -471,7 +475,7 @@ function createVegetation(
 ): THREE.Group {
   const group = new THREE.Group();
   const blade = (angle: number, tilt: number) =>
-    new THREE.ConeGeometry(0.06, 0.55, 3).translate(0, 0.27, 0).rotateZ(tilt).rotateY(angle);
+    new THREE.ConeGeometry(0.06, 0.55, 3, 1, true).translate(0, 0.27, 0).rotateZ(tilt).rotateY(angle);
   const tuftGeo = merge(blade(0, 0.25), blade(2.1, 0.3), blade(4.2, 0.2), blade(1, 0));
   const tuftMat = new THREE.MeshStandardMaterial({ roughness: 1 });
 
@@ -504,6 +508,8 @@ function createVegetation(
   }
   tufts.count = n;
   tufts.receiveShadow = true;
+  // Thousands of tiny blades add nothing to ambient occlusion but cost a lot to draw there.
+  tufts.layers.set(NO_AO_LAYER);
 
   const flowers = new THREE.InstancedMesh(
     new THREE.IcosahedronGeometry(0.12, 0).translate(0, 0.3, 0),
@@ -524,6 +530,7 @@ function createVegetation(
     flowers.setColorAt(n++, c.set(petals[Math.floor(Math.random() * petals.length)]));
   }
   flowers.count = n;
+  flowers.layers.set(NO_AO_LAYER);
 
   const bushes = new THREE.InstancedMesh(
     new THREE.IcosahedronGeometry(1, 1),

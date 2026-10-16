@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Feeder } from '../feeder';
 import { PLAYGROUND, routeOnPaths, type Spot, type StandItem } from '../layout';
+import { fastForward } from '../fastforward';
 import type { Rng } from '../rng';
 import { buildPerson, type PersonModel } from './person';
 
@@ -458,6 +459,7 @@ export class Visitor {
   }
 
   private animate(dt: number): void {
+    if (fastForward.on) return;
     const m = this.model;
     const k = 1 - Math.exp(-dt * 10);
     const kind = this.phase === 'busy' ? this.activity?.kind : undefined;

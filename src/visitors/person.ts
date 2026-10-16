@@ -1,19 +1,19 @@
 import * as THREE from 'three';
-import { mergeRig } from '../merge';
+import { skinRig } from '../skin';
 import type { Rng } from '../rng';
 
 /** A small stylized person. Faces +Z with feet at y = 0 (before scaling). */
 export interface PersonModel {
   root: THREE.Group;
   /** Moved as a whole for bobbing and sitting. */
-  pose: THREE.Group;
+  pose: THREE.Object3D;
   /** Hip pivots (left, right); rotation.x < 0 swings the leg forward. */
-  hips: THREE.Group[];
+  hips: THREE.Object3D[];
   /** Knee pivots (left, right); rotation.x > 0 bends the shin back. */
-  knees: THREE.Group[];
+  knees: THREE.Object3D[];
   /** Shoulder pivots (left, right). */
-  shoulders: THREE.Group[];
-  head: THREE.Group;
+  shoulders: THREE.Object3D[];
+  head: THREE.Object3D;
   /** Empty anchor in front of the chest for carried items (added after merging). */
   carry: THREE.Group;
   /** Height of the hip joint. */
@@ -117,9 +117,20 @@ export function buildPerson(child: boolean, keeper: boolean, rng: Rng): PersonMo
 
   const scale = child ? rng.float(0.58, 0.7) : rng.float(0.92, 1.06);
   root.scale.setScalar(scale);
-  mergeRig(root);
+  // One skinned mesh per person; the joints become bones.
+  const bone = skinRig(root);
   const carry = new THREE.Group();
   carry.position.set(0, 1.0, 0.34);
-  pose.add(carry);
-  return { root, pose, hips, knees, shoulders, head, carry, hipHeight, height: 1.75 };
+  bone(pose).add(carry);
+  return {
+    root,
+    pose: bone(pose),
+    hips: hips.map(bone),
+    knees: knees.map(bone),
+    shoulders: shoulders.map(bone),
+    head: bone(head),
+    carry,
+    hipHeight,
+    height: 1.75,
+  };
 }

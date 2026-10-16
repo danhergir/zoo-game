@@ -4,6 +4,7 @@ import { ROPE_SAG, type Enclosure } from '../enclosure';
 import type { Feeder } from '../feeder';
 import type { Spot } from '../layout';
 import type { Rng } from '../rng';
+import { fastForward } from '../fastforward';
 import { weatherNow } from '../weather';
 import { buildModel, poseLegs, type AnimalModel } from './models';
 import type { SpeciesDef } from './species';
@@ -105,6 +106,11 @@ export class Animal {
   private roared = false;
   /** Seconds left eating a treat from a visitor's hand. */
   private treatTime = 0;
+  /** Progress check while walking: where it was, and how long it's made no headway since. */
+  private readonly stallFrom = new THREE.Vector3();
+  private stallTime = 0;
+  /** Babies: seconds to wait before trying to move again after getting nowhere. */
+  private babyWait = 0;
   /** Tree being browsed (giraffes). */
   private tree: { x: number; z: number } | null = null;
   /** Climbers: height above ground and which climbing-frame platform they're on (-1 = on the ground). */
@@ -215,12 +221,18 @@ export class Animal {
     this.roarTime = 0;
     this.roared = false;
     this.treatTime = 0;
+    this.stallTime = 0;
+    this.stallFrom.set(0, 0, 0);
+    this.babyWait = 0;
     this.tree = null;
     this.diveIn = 0;
     this.diveTime = 0;
     this.elevation = 0;
     this.platform = -1;
     this.targetPlatform = -1;
+    this.climbDir = 0;
+    this.swingFrom = -1;
+    this.swingT = 0;
     this.sleepUp = false;
     this.playWith = null;
     this.chasing = false;
@@ -546,6 +558,23 @@ export class Animal {
     return true;
   }
 
+  /** Couldn't get there: settle for the next best thing. */
+  private giveUp(hour: number): void {
+    this.walking = false;
+    const f = this.feeder.root.position;
+    const p = this.root.position;
+    if (this.state === 'toBed') return this.setState('sleep');
+    if (this.state === 'toFeeder' && Math.hypot(f.x - p.x, f.z - p.z) < this.feeder.radius + this.radius + 1.5) {
+      return this.setState('eat');
+    }
+    if (this.state === 'toRock') {
+      this.enclosure.baskTaken.delete(this.baskSpot);
+      this.baskSpot = -1;
+    }
+    this.setState('idle', this.rng.float(2, 5));
+    if (this.isBedtime(hour)) this.setState('sleep');
+  }
+
   /** Hop up onto the rock, lie in the sun, hop back down. */
   private bask(dt: number, hour: number): void {
     const rock = this.enclosure.warmRock!;
@@ -622,12 +651,25 @@ export class Animal {
       const lx = side * off;
       const lz = -0.3 * off;
       goal = { x: mom.position.x + lx * c + lz * sn, z: mom.position.z - lx * sn + lz * c };
+      // That side blocked (a fence, a rock)? Try her other side.
+      if (!this.enclosure.walkable(goal.x, goal.z, this.radius)) {
+        goal = { x: mom.position.x - lx * c + lz * sn, z: mom.position.z + lx * sn + lz * c };
+      }
     }
 
     const dx = goal.x - p.x;
     const dz = goal.z - p.z;
     const dist = Math.hypot(dx, dz);
-    if (dist > 0.3) {
+    this.babyWait = Math.max(0, this.babyWait - dt);
+    if (dist > 0.3 && this.babyWait <= 0) {
+      if (p.distanceTo(this.stallFrom) > 0.4) {
+        this.stallFrom.copy(p);
+        this.stallTime = 0;
+      } else if ((this.stallTime += dt) > 1.5) {
+        // Can't get closer right now: sit tight for a while before trying again.
+        this.stallTime = 0;
+        this.babyWait = 8;
+      }
       const desired = Math.atan2(dx, dz);
       this.yaw = lerpAngle(this.yaw, desired, 1 - Math.exp(-dt * 6));
       const step = Math.min(dist, speed * Math.min(1, dist) * dt);
@@ -645,7 +687,13 @@ export class Animal {
       this.walking = false;
       this.yaw = lerpAngle(this.yaw, mom.heading, 1 - Math.exp(-dt * 2));
     }
-    if (!this.playWith) this.state = momResting && dist < 1 ? 'sleep' : this.walking ? 'wander' : 'idle';
+    // Mom resting: curl up nearby, even if the spot right beside her can't be reached.
+    if (momResting && !this.playWith && dist < 3.5) {
+      this.walking = false;
+      this.state = 'sleep';
+      return;
+    }
+    if (!this.playWith) this.state = this.walking ? 'wander' : 'idle';
   }
 
   private stopPlaying(): void {
@@ -855,6 +903,8 @@ export class Animal {
     this.state = state;
     this.stateTime = duration;
     this.moveTime = 0;
+    this.stallFrom.copy(this.root.position);
+    this.stallTime = 0;
     if (['wander', 'toFeeder', 'toFence', 'toTree', 'toBed', 'toPole', 'toPond', 'toRock'].includes(state)) {
       this.path = this.enclosure.findPath(this.root.position, this.target, this.radius, this.swims) ?? [this.target.clone()];
     }
@@ -873,8 +923,25 @@ export class Animal {
     const dz = goal.z - p.z;
     const dist = this.path.length > 1 ? Math.max(1, Math.hypot(dx, dz)) : Math.hypot(dx, dz);
     this.moveTime += dt;
+    // Walking in place against something (a crowd at the feeder, a full huddle, a rock)? Give up gracefully.
+    if (p.distanceTo(this.stallFrom) > 0.5) {
+      this.stallFrom.copy(p);
+      this.stallTime = 0;
+    } else if ((this.stallTime += dt) > 6) {
+      this.stallTime = 0;
+      this.giveUp(hour);
+      return;
+    }
 
-    if (dist < 0.35 || this.moveTime > 40) {
+    // Close enough counts: others may be crowding the exact spot (at a feeder, the huddle, the fence).
+    const last = this.path.length <= 1;
+    const huddle = this.enclosure.huddle;
+    const nearEnough =
+      (last && this.state === 'toFeeder' && dist < 0.9) ||
+      (last && ['toFence', 'toTree', 'toPond'].includes(this.state) && dist < 0.8) ||
+      // Anywhere in the huddle will do.
+      (this.state === 'toBed' && huddle !== null && Math.hypot(p.x - huddle.x, p.z - huddle.z) < 3.6);
+    if (dist < 0.35 || nearEnough || this.moveTime > 40) {
       this.walking = false;
       const arrived = this.path.length <= 1;
       if (this.state === 'toFeeder' && arrived && dist < 1.5) this.setState('eat');
@@ -965,6 +1032,25 @@ export class Animal {
   }
 
   private animate(dt: number): void {
+    // Random draws first (they must happen identically when fast-forwarding).
+    this.lookTimer -= dt;
+    if (this.lookTimer <= 0) {
+      this.lookTimer = this.rng.float(1.5, 4);
+      this.lookYaw = this.state === 'idle' ? this.rng.float(-0.6, 0.6) : 0;
+    }
+    if (this.swimming) {
+      this.diveIn -= dt;
+      this.diveTime = Math.max(0, this.diveTime - dt);
+      if (this.diveIn <= 0) {
+        this.diveIn = this.rng.float(4, 10);
+        this.diveTime = this.rng.float(1, 2.2);
+      }
+    }
+    // `walking` feeds back into the simulation, so settle it before skipping the visuals.
+    if (!['wander', 'toFeeder', 'toFence', 'toTree', 'toBed', 'toPole', 'toPond', 'toRock', 'play'].includes(this.state) && !this.mother) {
+      this.walking = false;
+    }
+    if (fastForward.on) return;
     const m = this.model;
     const k = 1 - Math.exp(-dt * 8);
     const L = m.legLength;
@@ -972,9 +1058,6 @@ export class Animal {
     const eating = this.state === 'eat';
     const greeting = this.state === 'greet';
     const browsing = this.state === 'browse';
-    if (!['wander', 'toFeeder', 'toFence', 'toTree', 'toBed', 'toPole', 'toPond', 'toRock', 'play'].includes(this.state) && !this.mother) {
-      this.walking = false;
-    }
 
     this.root.rotation.y = this.yaw;
 
@@ -986,15 +1069,6 @@ export class Animal {
     const lying = (asleep && !this.species.huddles) || rolling || basking;
     poseLegs(m, k, lying || swimming ? 'lie' : this.walking ? 'walk' : 'stand', this.stride);
 
-    // Swimmers dive now and then: under for a moment, then back up.
-    if (swimming) {
-      this.diveIn -= dt;
-      this.diveTime = Math.max(0, this.diveTime - dt);
-      if (this.diveIn <= 0) {
-        this.diveIn = this.rng.float(4, 10);
-        this.diveTime = this.rng.float(1, 2.2);
-      }
-    }
     const bob = this.walking ? Math.abs(Math.sin(this.stride)) * 0.05 * L : 0;
     let poseY = lying ? -L * 0.85 : bob;
     // Cubs at play: a little hop on the pounce.
@@ -1021,11 +1095,6 @@ export class Animal {
     });
 
     // Head: look around when idle, dip when eating, rest when asleep.
-    this.lookTimer -= dt;
-    if (this.lookTimer <= 0) {
-      this.lookTimer = this.rng.float(1.5, 4);
-      this.lookYaw = this.state === 'idle' ? this.rng.float(-0.6, 0.6) : 0;
-    }
     let pitch = 0;
     if (eating) pitch = m.eatPitch + Math.sin(this.time * 7) * 0.08;
     else if (greeting && this.roarTime > 0) pitch = -0.6 + Math.sin(this.time * 30) * 0.04; // roar: head up
@@ -1149,6 +1218,7 @@ export class Animal {
   }
 
   private updateBubble(): void {
+    if (fastForward.on) return;
     let text = '';
     if (this.state === 'sleep') text = '💤';
     else if (this.hunger < 0.2 && this.state !== 'eat') text = this.feeder.food === 'meat' ? '🍖' : '🌾';

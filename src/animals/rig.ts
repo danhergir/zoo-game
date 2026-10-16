@@ -8,31 +8,31 @@ import { NO_AO_LAYER } from '../post';
  */
 export interface Leg {
   /** Rotation.x swings the whole leg (negative = forward). */
-  hip: THREE.Group;
+  hip: THREE.Object3D;
   /** Rotation.x > 0 bends the lower leg backward. */
-  knee: THREE.Group;
+  knee: THREE.Object3D;
   front: boolean;
 }
 
 export interface AnimalModel {
   root: THREE.Group;
   /** Lowered as a whole when lying down. */
-  pose: THREE.Group;
+  pose: THREE.Object3D;
   /** Pivot at the neck; rotation.x > 0 tips the head down. */
-  head: THREE.Group;
+  head: THREE.Object3D;
   /** Order: front-left, front-right, back-left, back-right. */
   legs: Leg[];
-  tail: THREE.Group | null;
+  tail: THREE.Object3D | null;
   /** Elephant trunk segments, root first. */
-  trunk: THREE.Group[];
+  trunk: THREE.Object3D[];
   /** Neck segments, base first (giraffe); bend them forward with rotation.x > 0. */
-  neck: THREE.Group[];
+  neck: THREE.Object3D[];
   /** Flipper pivots (penguins), left then right; rotation.z spreads them. */
-  flippers: THREE.Group[];
+  flippers: THREE.Object3D[];
   /** Rocks side to side when walking (penguins). */
   waddle?: boolean;
   /** Pivots that flap (elephant ears), with their resting yaw. */
-  ears: { pivot: THREE.Group; rest: number }[];
+  ears: { pivot: THREE.Object3D; rest: number }[];
   legLength: number;
   /** Top of the model, for placing the thought bubble. */
   height: number;

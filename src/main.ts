@@ -6,6 +6,7 @@ import { CameraRig } from './camera';
 import { DAY_SECONDS, HOUR_SECONDS, RESET_HOUR, lastReset, zooTime } from './clock';
 import { Ambient } from './ambient';
 import { Amenities } from './amenities';
+import { fastForward } from './fastforward';
 import { Flamingos } from './flamingos';
 import { Lagoon } from './lagoon';
 import { Enclosure } from './enclosure';
@@ -251,10 +252,13 @@ function catchUp(nowMs: number): void {
   const { index, startMs } = lastReset(nowMs);
   const target = Math.floor((nowMs - startMs) / 1000 / SIM_STEP);
   if (index !== simReset || target < simSteps) resetSimulation(index);
+  // Far behind (page just opened, or the tab was in the background): skip visual work until nearly caught up.
   while (simSteps < target) {
+    fastForward.on = target - simSteps > 30;
     step(SIM_STEP, simHour());
     simSteps++;
   }
+  fastForward.on = false;
   const hour = simHour();
   if (isOpen(hour) !== isOpen(state.hour)) {
     hud.toast(isOpen(hour) ? 'The zoo is open! 🎟️' : 'The zoo is closed for the night', isOpen(hour) ? 'good' : 'info');
@@ -273,11 +277,39 @@ function step(dt: number, hour: number): void {
   separate();
 }
 
+/**
+ * Automatic quality: if the real frame rate stays low, step the graphics down
+ * (resolution, then ambient occlusion, then post-processing); step back up
+ * after a good while of smooth frames. Pressing G takes manual control.
+ */
+let quality = 0;
+let autoQuality = true;
+let fpsWindow = 0;
+let fpsFrames = 0;
+let goodWindows = 0;
+function watchFrameRate(realDt: number): void {
+  if (!autoQuality || document.hidden || realDt > 0.25) return; // ignore background tabs and hiccups
+  fpsWindow += realDt;
+  fpsFrames++;
+  if (fpsWindow < 3) return;
+  const fps = fpsFrames / fpsWindow;
+  fpsWindow = 0;
+  fpsFrames = 0;
+  if (fps < 45 && quality < 3) {
+    world.setQuality(++quality);
+    goodWindows = 0;
+  } else if (fps > 57 && quality > 0 && ++goodWindows >= 4) {
+    world.setQuality(--quality);
+    goodWindows = 0;
+  }
+}
+
 window.addEventListener('keydown', (e) => {
   if (e.code !== 'KeyG') return;
-  world.postEnabled = !world.postEnabled;
-  world.resize();
-  hud.toast(world.postEnabled ? 'Graphics: high' : 'Graphics: fast');
+  autoQuality = false;
+  quality = quality === 3 ? 0 : 3;
+  world.setQuality(quality);
+  hud.toast(quality === 0 ? 'Graphics: high' : 'Graphics: fast');
 });
 
 window.addEventListener('resize', () => {
@@ -315,7 +347,9 @@ function frame(dt: number): void {
 const timer = new THREE.Timer();
 world.renderer.setAnimationLoop((time) => {
   timer.update(time);
-  const dt = Math.min(timer.getDelta(), 0.1);
+  const realDt = timer.getDelta();
+  const dt = Math.min(realDt, 0.1);
+  watchFrameRate(realDt);
   // Usually one step per frame; after a backgrounded tab, a fast-forward to now.
   catchUp(Date.now() + clockOffsetMs);
   frame(dt);
@@ -378,12 +412,14 @@ if (import.meta.env.DEV) {
         }
       },
       /** Re-run reset `index` for `steps` steps from scratch and return the fingerprint. */
-      replay(index: number, steps: number): string {
+      replay(index: number, steps: number, fast = true): string {
         resetSimulation(index);
         while (simSteps < steps) {
+          fastForward.on = fast && steps - simSteps > 30;
           step(SIM_STEP, simHour());
           simSteps++;
         }
+        fastForward.on = false;
         return this.fingerprint();
       },
     },

@@ -1,4 +1,4 @@
-import { mergeRig } from '../merge';
+import { skinRig } from '../skin';
 import { buildElephant } from './builders/elephant';
 import { buildGiraffe } from './builders/giraffe';
 import { buildLion } from './builders/lion';
@@ -24,8 +24,18 @@ const BUILDERS: Record<SpeciesId, (male: boolean) => AnimalModel> = {
 };
 
 export function buildModel(species: SpeciesId, male: boolean): AnimalModel {
-  const model = BUILDERS[species](male);
-  // Merge the rigid parts of each joint so an animal costs a few draw calls, not dozens.
-  mergeRig(model.root);
-  return model;
+  const m = BUILDERS[species](male);
+  // One skinned mesh per material: an animal costs a few draw calls, not dozens. Joints become bones.
+  const bone = skinRig(m.root);
+  return {
+    ...m,
+    pose: bone(m.pose),
+    head: bone(m.head),
+    legs: m.legs.map((l) => ({ hip: bone(l.hip), knee: bone(l.knee), front: l.front })),
+    tail: m.tail && bone(m.tail),
+    trunk: m.trunk.map(bone),
+    neck: m.neck.map(bone),
+    flippers: m.flippers.map(bone),
+    ears: m.ears.map((e) => ({ pivot: bone(e.pivot), rest: e.rest })),
+  };
 }

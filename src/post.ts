@@ -19,7 +19,7 @@ const TiltShiftShader = {
     tDiffuse: { value: null },
     texel: { value: new THREE.Vector2(1 / 1024, 1 / 1024) },
     focus: { value: 0.5 },
-    band: { value: 0.2 },
+    band: { value: 0.24 },
     amount: { value: 2.4 },
   },
   vertexShader: /* glsl */ `
@@ -35,11 +35,10 @@ const TiltShiftShader = {
     uniform float band;
     uniform float amount;
     varying vec2 vUv;
-    // 12-tap Poisson disc.
-    const vec2 taps[12] = vec2[](
+    // 8-tap Poisson disc.
+    const vec2 taps[8] = vec2[](
       vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457), vec2(-0.203, 0.621),
-      vec2(0.962, -0.195), vec2(0.473, -0.480), vec2(0.519, 0.767), vec2(0.185, -0.893),
-      vec2(0.507, 0.064), vec2(0.896, 0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598)
+      vec2(0.962, -0.195), vec2(0.473, -0.480), vec2(0.519, 0.767), vec2(0.185, -0.893)
     );
     void main() {
       float d = max(0.0, abs(vUv.y - focus) - band) / (1.0 - band);
@@ -50,8 +49,8 @@ const TiltShiftShader = {
       }
       vec2 radius = texel * amount * d * 4.0;
       vec4 sum = center;
-      for (int i = 0; i < 12; i++) sum += texture2D(tDiffuse, vUv + taps[i] * radius);
-      gl_FragColor = sum / 13.0;
+      for (int i = 0; i < 8; i++) sum += texture2D(tDiffuse, vUv + taps[i] * radius);
+      gl_FragColor = sum / 9.0;
     }`,
 };
 
@@ -75,7 +74,7 @@ export class PostFX {
 
     this.aoCamera = camera.clone();
     this.gtao = new GTAOPass(scene, this.aoCamera, size.x, size.y);
-    this.gtao.updateGtaoMaterial({ radius: 1.6, distanceExponent: 1.5, thickness: 2, scale: 1, samples: 12 });
+    this.gtao.updateGtaoMaterial({ radius: 1.6, distanceExponent: 1.5, thickness: 2, scale: 1, samples: 8 });
     this.gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 8 });
     this.gtao.blendIntensity = 0.85;
     this.composer.addPass(this.gtao);
@@ -91,6 +90,10 @@ export class PostFX {
     this.gtao.setSize(Math.round((width * pixelRatio) / 2), Math.round((height * pixelRatio) / 2));
     this.tilt.uniforms.texel.value.set(1 / (width * pixelRatio), 1 / (height * pixelRatio));
     this.tilt.uniforms.amount.value = 1.6 * pixelRatio;
+  }
+
+  setAO(on: boolean): void {
+    this.gtao.enabled = on;
   }
 
   render(): void {

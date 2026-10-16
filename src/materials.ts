@@ -11,10 +11,18 @@ export function outlineMaterial(thickness: number): THREE.ShaderMaterial {
   if (m) return m;
   m = new THREE.ShaderMaterial({
     uniforms: { thickness: { value: thickness }, color: { value: new THREE.Color('#2a2018') } },
+    // Works for skinned meshes too: the hull follows the bones.
     vertexShader: /* glsl */ `
+      #include <common>
+      #include <skinning_pars_vertex>
       uniform float thickness;
       void main() {
-        vec3 p = position + normalize(normal) * thickness;
+        #include <beginnormal_vertex>
+        #include <skinbase_vertex>
+        #include <skinnormal_vertex>
+        #include <begin_vertex>
+        #include <skinning_vertex>
+        vec3 p = transformed + normalize(objectNormal) * thickness;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
       }`,
     fragmentShader: /* glsl */ `

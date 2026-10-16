@@ -96,11 +96,12 @@ export class Ambient {
         const r = rng.float(5, 10);
         const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1).scale(1.3, 0.55, 1), this.cloudMat);
         puff.position.set(rng.float(-12, 12), rng.float(-1.5, 2), rng.float(-6, 6));
-        puff.castShadow = true;
+        // No cloud shadows: huge shapes are expensive to draw into the shadow map.
         cluster.add(puff);
       }
       const merged = mergeStatic(cluster);
       merged.userData = { x: rng.float(-260, 260), z: rng.float(-220, 160), y: rng.float(75, 95), speed: rng.float(1.2, 2.4) };
+      merged.traverse((o) => o.layers.set(NO_AO_LAYER));
       this.clouds.push(merged);
       this.group.add(merged);
     }

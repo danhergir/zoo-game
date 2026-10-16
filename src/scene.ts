@@ -49,8 +49,10 @@ export class World {
   readonly hemi = new THREE.HemisphereLight('#d6ecff', '#6b7a45', 1);
   /** Cool fill light so the zoo stays readable at night. */
   readonly moon = new THREE.DirectionalLight('#9db4ff', 0);
-  /** Post-processing on/off (G key). */
+  /** Post-processing on/off (G key, or automatic quality). */
   postEnabled = true;
+  /** Render scale for post-processing; automatic quality lowers it on slower machines. */
+  postScale = 1.5;
 
   private readonly fog = new THREE.Fog(SKY_HORIZON_DAY, 230, 560);
   private readonly sky = new SkyDome();
@@ -66,6 +68,8 @@ export class World {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // Shadows are redrawn every other frame (see render): halves their cost, and a one-frame lag isn't visible.
+    this.renderer.shadowMap.autoUpdate = false;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
@@ -105,6 +109,17 @@ export class World {
     this.addLampsAndBenches();
   }
 
+  /**
+   * Quality level: 0 = everything, 1 = slightly lower resolution,
+   * 2 = no ambient occlusion, 3 = no post-processing ("fast").
+   */
+  setQuality(level: number): void {
+    this.postEnabled = level < 3;
+    this.postScale = level === 0 ? 1.5 : 1.2;
+    this.post?.setAO(level < 2);
+    this.resize();
+  }
+
   /** Must be called once the camera exists; sets up post-processing. */
   attachCamera(camera: THREE.PerspectiveCamera): void {
     camera.layers.enable(NO_AO_LAYER);
@@ -124,7 +139,7 @@ export class World {
     const w = window.innerWidth;
     const h = window.innerHeight;
     // Post-processing is costly on retina screens; 1.5× is a good balance.
-    const ratio = Math.min(window.devicePixelRatio, this.postEnabled ? 1.5 : 2);
+    const ratio = Math.min(window.devicePixelRatio, this.postEnabled ? this.postScale : 2);
     this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(w, h);
     this.labelRenderer.setSize(w, h);
@@ -177,8 +192,11 @@ export class World {
     for (const l of this.lampLights) l.intensity = night * 40;
   }
 
+  private frameCount = 0;
+
   render(camera: THREE.Camera): void {
     this.sky.group.position.copy(camera.position);
+    if (this.frameCount++ % 2 === 0) this.renderer.shadowMap.needsUpdate = true;
     if (this.post && this.postEnabled) this.post.render();
     else this.renderer.render(this.scene, camera);
     this.labelRenderer.render(this.scene, camera);
@@ -502,8 +520,10 @@ function createForest(): THREE.Group {
   const count = 320;
   const pines = new THREE.InstancedMesh(pineGeo, mat, count);
   const rounds = new THREE.InstancedMesh(roundGeo, mat, count);
-  pines.castShadow = rounds.castShadow = true;
+  // The forest stands outside the shadow area and adds little to ambient occlusion: skip both.
   pines.receiveShadow = rounds.receiveShadow = true;
+  pines.layers.set(NO_AO_LAYER);
+  rounds.layers.set(NO_AO_LAYER);
 
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
@@ -560,10 +580,10 @@ function createVegetation(
     return [Math.cos(a) * r, ZOO_CENTER_Z + Math.sin(a) * r];
   };
 
-  const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, 22000);
+  const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, 14000);
   let n = 0;
   for (let i = 0; i < 50000 && n < tufts.count; i++) {
-    const [x, z] = random(FLAT_RADIUS + 50);
+    const [x, z] = random(FLAT_RADIUS + 5);
     if (blocked(x, z)) continue;
     const dry = inside(x, z);
     if (dry && Math.random() < 0.6) continue;
@@ -623,6 +643,7 @@ function createVegetation(
   }
   bushes.count = n;
   bushes.castShadow = bushes.receiveShadow = true;
+  bushes.layers.set(NO_AO_LAYER);
 
   group.add(tufts, flowers, bushes);
   return group;

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Builder, ell, limb, mat, stem } from './animals/rig';
-import { mergeRig, mergeStatic } from './merge';
+import { mergeStatic } from './merge';
+import { skinRig } from './skin';
 import { Rng } from './rng';
 
 /**
@@ -13,11 +14,11 @@ import { Rng } from './rng';
 interface Bird {
   root: THREE.Group;
   /** Neck segments, base first; the head hangs off the last one. */
-  neck: THREE.Group[];
-  head: THREE.Group;
+  neck: THREE.Object3D[];
+  head: THREE.Object3D;
   /** Hip pivots (left, right) and knee pivots. */
-  hips: THREE.Group[];
-  knees: THREE.Group[];
+  hips: THREE.Object3D[];
+  knees: THREE.Object3D[];
   home: { x: number; z: number };
   away: { x: number; z: number };
   period: number;
@@ -67,8 +68,8 @@ function buildBird(): Omit<Bird, 'home' | 'away' | 'period' | 'phase' | 'facing'
     hips.push(hip);
     knees.push(knee);
   }
-  mergeRig(root);
-  return { root, neck, head, hips, knees };
+  const bone = skinRig(root);
+  return { root, neck: neck.map(bone), head: bone(head), hips: hips.map(bone), knees: knees.map(bone) };
 }
 
 const lerp = THREE.MathUtils.lerp;

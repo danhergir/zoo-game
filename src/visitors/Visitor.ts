@@ -95,6 +95,9 @@ export class Visitor {
   readonly followers: Visitor[] = [];
   /** Lifted up by a parent at a viewing deck (kids). */
   lifted = false;
+  /** Holding an umbrella (it's raining). */
+  umbrella = false;
+  private umbrellaProp: THREE.Group | null = null;
   /** Current swing angle while on a swing (the seat follows it). */
   swingAngle = 0;
   /** What they're carrying, and for how long (cones and hot dogs get finished). */
@@ -205,6 +208,24 @@ export class Visitor {
     this.itemProps.traverse((o) => (o.castShadow = true));
   }
 
+  /** Open an umbrella over their head in the rain (made on first use, in their own color). */
+  private updateUmbrella(): void {
+    if (this.umbrella && !this.umbrellaProp && !this.keeper) {
+      const canopy = new THREE.Mesh(
+        new THREE.ConeGeometry(0.75, 0.3, 10, 1, true),
+        new THREE.MeshStandardMaterial({ color: this.rng.pick(BALLOON_COLORS), roughness: 0.5, side: THREE.DoubleSide }),
+      );
+      canopy.position.y = 2.15;
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.9, 4), propMats.string);
+      pole.position.set(-0.2, 1.75, 0.05);
+      this.umbrellaProp = new THREE.Group();
+      this.umbrellaProp.add(canopy, pole);
+      canopy.castShadow = true;
+      this.root.add(this.umbrellaProp);
+    }
+    if (this.umbrellaProp) this.umbrellaProp.visible = this.umbrella;
+  }
+
   /** World position of the balloon (for when it slips away). */
   balloonWorld(out: THREE.Vector3): THREE.Vector3 {
     return this.balloonProp.localToWorld(out.set(0, 1.45, 0));
@@ -282,6 +303,7 @@ export class Visitor {
     }
     this.itemTime -= dt;
     if (this.itemTime <= 0 && this.item) this.carry(null); // finished the snack
+    this.updateUmbrella();
 
     // Pop in on arrival, shrink away at the exit.
     const leaving = this.phase === 'leaving';
@@ -510,6 +532,7 @@ export class Visitor {
       if (climbing) x = -2.6 + Math.sin(this.time * 8 + i * Math.PI) * 0.4;
       if (onSlide && slideT > 2.1) x = -2.9; // arms up, wheee
       if (holdingKid) [x, z] = [-1.7, -side * 0.1];
+      if (this.umbrella && !this.keeper && i === 1 && !holdingKid && !sitting) [x, z] = [-2.4, 0.25]; // holding the umbrella up
       sh.rotation.x = lerp(sh.rotation.x, x, k);
       sh.rotation.z = lerp(sh.rotation.z, z, k);
     });

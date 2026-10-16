@@ -17,6 +17,7 @@ import {
   type Spot,
 } from '../layout';
 import { Rng } from '../rng';
+import { weatherNow } from '../weather';
 import { Visitor, type Activity } from './Visitor';
 
 /** Seconds a visitor holds out a treat before the animal takes it. */
@@ -121,11 +122,14 @@ export class Crowd {
     if (open && this.spawnTimer <= 0 && this.visitors.length < MAX_VISITORS) {
       this.spawn();
       // Roughly one group every 3 seconds at a perfect rating, slower when animals are unhappy.
-      this.spawnTimer = this.rng.float(1.5, 4.5) / (0.3 + this.rating);
+      // Rain keeps some people at home.
+      this.spawnTimer = (this.rng.float(1.5, 4.5) / (0.3 + this.rating)) * (1 + 1.5 * weatherNow.rain);
     }
 
     const closing = hour >= CLOSE_HOUR || hour < ARRIVE_FROM;
+    const umbrellas = weatherNow.rain > 0.3;
     for (const v of this.visitors) {
+      v.umbrella = umbrellas;
       v.update(dt);
       if (v.leader) {
         this.follow(v, dt);

@@ -4,6 +4,7 @@ import { ROPE_SAG, type Enclosure } from '../enclosure';
 import type { Feeder } from '../feeder';
 import type { Spot } from '../layout';
 import type { Rng } from '../rng';
+import { weatherNow } from '../weather';
 import { buildModel, poseLegs, type AnimalModel } from './models';
 import type { SpeciesDef } from './species';
 
@@ -459,7 +460,15 @@ export class Animal {
       // Off to eat leaves.
     } else if (s.basks && hour > 11 && hour < 15.5 && this.rng.chance(s.basks) && this.goToRock()) {
       // Off to sunbathe.
-    } else if (s.sprays && hour > 9 && hour < 18 && this.enclosure.pond && this.rng.chance(s.sprays) && this.goToPond()) {
+    } else if (
+      s.sprays &&
+      hour > 9 &&
+      hour < 18 &&
+      this.enclosure.pond &&
+      // Elephants love the rain: showers bring out the trunk showers.
+      this.rng.chance(Math.min(0.9, s.sprays * (weatherNow.rain > 0.3 ? 3 : 1))) &&
+      this.goToPond()
+    ) {
       // Off for a shower.
     } else if (s.rolls && this.rng.chance(s.rolls)) {
       this.setState('roll', 5);

@@ -70,6 +70,11 @@ export class CameraRig {
     if (obj) this.distance = Math.min(this.distance, 45);
   }
 
+  /** The point the camera orbits (rain falls around it). */
+  get focus(): THREE.Vector3 {
+    return this.target;
+  }
+
   get following(): THREE.Object3D | null {
     return this.follow;
   }

@@ -4,6 +4,7 @@ import { Animal } from './animals/Animal';
 import { SPECIES } from './animals/species';
 import { CameraRig } from './camera';
 import { DAY_SECONDS, HOUR_SECONDS, RESET_HOUR, lastReset, zooTime } from './clock';
+import { Ambient } from './ambient';
 import { Amenities } from './amenities';
 import { Flamingos } from './flamingos';
 import { Lagoon } from './lagoon';
@@ -16,6 +17,7 @@ import { ReverseZoo } from './reverse';
 import { Rng, withSeededRandom } from './rng';
 import { World } from './scene';
 import { Train } from './train';
+import { weatherAt, weatherNow } from './weather';
 import { Hud, type GameState } from './ui/hud';
 import { Inspector } from './ui/inspector';
 import { Crowd } from './visitors/Crowd';
@@ -86,7 +88,8 @@ const lagoon = new Lagoon(LAGOON.x, LAGOON.z);
 const flamingos = new Flamingos(FLAMINGO_POND.x, FLAMINGO_POND.z, FLAMINGO_POND.r, FLAMINGO_POND.fence);
 const amenities = withSeededRandom('tiny-zoo:amenities', () => new Amenities());
 const train = new Train();
-world.scene.add(lagoon.group, flamingos.group, amenities.group, train.group);
+const ambient = new Ambient();
+world.scene.add(lagoon.group, flamingos.group, amenities.group, train.group, ambient.group);
 
 withSeededRandom('tiny-zoo:plants', () =>
   world.decorate(
@@ -261,6 +264,7 @@ function catchUp(nowMs: number): void {
 }
 
 function step(dt: number, hour: number): void {
+  weatherAt(zooDay(), hour);
   for (const e of enclosures) e.feedingNow = keepers.feedingAt(e.name) !== null;
   for (const a of animals) a.update(dt, hour);
   crowd.update(dt, hour);
@@ -283,6 +287,9 @@ window.addEventListener('resize', () => {
 
 hud.toast('Welcome! Click an animal to see how it’s doing.', 'good');
 
+/** The zoo day the simulation is on (the day of its last 4:00 reset, plus one after midnight). */
+const zooDay = () => simReset + (simHour() < RESET_HOUR ? 1 : 0);
+
 /** Shared zoo time in seconds, continuous across days (drives the lagoon's fish and other ambient life). */
 const zooSeconds = () => ((simReset % 1000) + 1000) % 1000 * DAY_SECONDS + simSteps * SIM_STEP;
 
@@ -292,6 +299,7 @@ function frame(dt: number): void {
   flamingos.update(zooSeconds(), state.hour);
   amenities.update(crowd.swingRiders(), zooSeconds());
   train.update(zooSeconds(), state.hour);
+  ambient.update(zooSeconds(), state.hour, weatherNow, rig.focus);
   const selected = inspector.selected;
   if (selected) {
     ring.position.set(selected.position.x, 0.05, selected.position.z);
@@ -299,7 +307,7 @@ function frame(dt: number): void {
   }
   hud.update();
 
-  world.setTimeOfDay(state.hour);
+  world.setTimeOfDay(state.hour, weatherNow);
   rig.update(dt);
   world.render(rig.camera);
 }
@@ -326,6 +334,8 @@ if (import.meta.env.DEV) {
       world,
       rig,
       isPath,
+      weatherAt,
+      weatherNow,
       focus(name: string) {
         const a = animals.find((x) => x.name === name);
         if (a) {

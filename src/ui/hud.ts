@@ -1,3 +1,5 @@
+import { weatherIcon, weatherNow } from '../weather';
+
 export interface GameState {
   day: number;
   hour: number;
@@ -34,9 +36,10 @@ export class Hud {
     const s = this.state;
     const minute = Math.floor(s.hour * 60);
     if (minute === this.shownMinute) return;
+    const icon = weatherIcon(s.hour, weatherNow);
     this.shownMinute = minute;
     const h = Math.floor(s.hour);
-    this.clockEl.textContent = `${s.hour >= 6 && s.hour < 19 ? '☀️' : '🌙'} ${pad(h)}:${pad(minute % 60)}`;
+    this.clockEl.textContent = `${icon} ${pad(h)}:${pad(minute % 60)}`;
   }
 
   toast(message: string, kind: 'info' | 'warn' | 'good' = 'info'): void {

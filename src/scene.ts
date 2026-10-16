@@ -5,6 +5,7 @@ import { cobbleTexture, plankTexture, repeated } from './materials';
 import { mergeStatic } from './merge';
 import { BENCHES, DECKS, GATE_Z, LAMPS, PATH_RECTS, PLAZA, STAFF_HUT, isPath } from './layout';
 import { NO_AO_LAYER, PostFX } from './post';
+import type { WeatherState } from './weather';
 
 const SKY_TOP_DAY = new THREE.Color('#5aa9e6');
 const SKY_HORIZON_DAY = new THREE.Color('#cfe9f7');
@@ -12,6 +13,13 @@ const SKY_TOP_NIGHT = new THREE.Color('#060b1f');
 const SKY_HORIZON_NIGHT = new THREE.Color('#25345e');
 const SKY_DUSK = new THREE.Color('#f59a62');
 const SUN_DAY = new THREE.Color('#fff2dc');
+const OVERCAST_TOP = new THREE.Color('#8d9aa6');
+const OVERCAST_HORIZON = new THREE.Color('#c4ccd2');
+const WET = new THREE.Color('#8a8f99');
+const DRY = new THREE.Color('#ffffff');
+
+/** Path materials, darkened and made glossy when it rains. */
+const pathMaterials: THREE.MeshStandardMaterial[] = [];
 const SUN_LOW = new THREE.Color('#ffa364');
 
 /** Merges geometries, converting to non-indexed first so mixed types are compatible. */
@@ -124,7 +132,11 @@ export class World {
   }
 
   /** hour in [0, 24). Sunrise at 6, sunset at 18. */
-  setTimeOfDay(hour: number): void {
+  setTimeOfDay(hour: number, weather?: WeatherState): void {
+    const cloud = weather?.cloud ?? 0;
+    const rain = weather?.rain ?? 0;
+    const fog = weather?.fog ?? 0;
+    const wet = weather?.wet ?? 0;
     const angle = ((hour - 6) / 12) * Math.PI;
     const elevation = Math.sin(angle);
     const daylight = THREE.MathUtils.smoothstep(elevation, -0.12, 0.3);
@@ -136,18 +148,29 @@ export class World {
       t.y + Math.max(elevation, 0.18) * 140,
       t.z + 60,
     );
-    this.sun.intensity = 2.8 * daylight;
+    // Clouds dim and soften the sun.
+    this.sun.intensity = 2.8 * daylight * (1 - 0.85 * cloud) * (1 - 0.5 * rain);
     this.sun.color.copy(SUN_LOW).lerp(SUN_DAY, THREE.MathUtils.clamp(elevation * 2, 0, 1));
 
-    this.hemi.intensity = 0.6 + 0.6 * daylight;
+    this.hemi.intensity = (0.6 + 0.6 * daylight) * (1 - 0.1 * cloud) * (1 - 0.15 * rain);
     this.hemi.color.set('#6f87d6').lerp(new THREE.Color('#d6ecff'), daylight);
     this.moon.intensity = 0.9 * (1 - daylight);
 
     const top = this.sky.top.copy(SKY_TOP_NIGHT).lerp(SKY_TOP_DAY, daylight);
     const horizon = this.sky.horizon.copy(SKY_HORIZON_NIGHT).lerp(SKY_HORIZON_DAY, daylight).lerp(SKY_DUSK, dusk);
     top.lerp(SKY_DUSK, dusk * 0.25);
-    this.sky.setStars(1 - daylight);
+    // Overcast: a flat grey sky (only by day; nights stay dark).
+    top.lerp(OVERCAST_TOP, cloud * 0.75 * daylight);
+    horizon.lerp(OVERCAST_HORIZON, cloud * 0.7 * daylight);
+    this.sky.setStars((1 - daylight) * (1 - cloud));
     this.fog.color.copy(horizon);
+    // Fog closes in; rain shortens the view a little too.
+    this.fog.near = 230 * (1 - 0.85 * fog) - rain * 70;
+    this.fog.far = 560 * (1 - 0.72 * fog) - rain * 150;
+    for (const m of pathMaterials) {
+      m.color.copy(DRY).lerp(WET, wet * 0.55);
+      m.roughness = 0.95 - wet * 0.6;
+    }
 
     const night = 1 - THREE.MathUtils.smoothstep(elevation, -0.05, 0.15);
     this.lampBulbs.emissiveIntensity = night * 3;
@@ -295,6 +318,12 @@ function createGround(): THREE.Mesh {
   return mesh;
 }
 
+function pathMaterial(map: THREE.Texture): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ map, roughness: 0.95 });
+  pathMaterials.push(m);
+  return m;
+}
+
 function createPaths(): THREE.Group {
   const group = new THREE.Group();
   const tex = cobbleTexture();
@@ -302,7 +331,7 @@ function createPaths(): THREE.Group {
   for (const [x, z, w, d] of PATH_RECTS) {
     const m = new THREE.Mesh(
       new THREE.PlaneGeometry(w, d),
-      new THREE.MeshStandardMaterial({ map: repeated(tex, w / 5, d / 5), roughness: 0.95 }),
+      pathMaterial(repeated(tex, w / 5, d / 5)),
     );
     m.rotation.x = -Math.PI / 2;
     m.position.set(x, 0.012, z);
@@ -311,7 +340,7 @@ function createPaths(): THREE.Group {
   }
   const plaza = new THREE.Mesh(
     new THREE.CircleGeometry(PLAZA.r, 48),
-    new THREE.MeshStandardMaterial({ map: repeated(tex, 3.6, 3.6), roughness: 0.95 }),
+    pathMaterial(repeated(tex, 3.6, 3.6)),
   );
   plaza.rotation.x = -Math.PI / 2;
   plaza.position.set(PLAZA.x, 0.016, PLAZA.z);

@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { buildModel, poseLegs, type AnimalModel } from './animals/models';
 import type { SpeciesId } from './animals/species';
 import type { Enclosure } from './enclosure';
-import { BENCHES, DECKS, PLAZA, routeOnPaths, type Spot } from './layout';
+import { BENCHES, DECKS, FLAMINGO_POND, LAGOON, PLAZA, routeOnPaths, type Spot } from './layout';
 import { Rng } from './rng';
+import { buildPerson, type PersonModel } from './visitors/person';
 import { Visitor } from './visitors/Visitor';
 
 /**
@@ -184,6 +185,9 @@ export class ReverseZoo {
   /** Fence spots for people, three per animal spot, a step closer to the fence. */
   private readonly fenceSpots = new Map<Enclosure, Spot[]>();
   private built = false;
+  /** People where the animals usually are: snorkeling in the lagoon, in swim rings, flamingo-posing. */
+  private readonly extras: ((t: number) => void)[] = [];
+  private time = 0;
   /** The reverse zoo is a local view, so it doesn't need to match other browsers. */
   private readonly rng = new Rng(`reverse:${Math.random()}`);
 
@@ -206,6 +210,8 @@ export class ReverseZoo {
 
   update(dt: number): void {
     if (!this.active) return;
+    this.time += dt;
+    for (const e of this.extras) e(this.time);
     for (const t of this.tourists) {
       t.update(dt);
       if (t.consumeRoar() && t.plan?.kind === 'view') {
@@ -234,7 +240,14 @@ export class ReverseZoo {
     }
 
     // People inside the fences.
-    const counts: Record<string, number> = { 'Zebra Plains': 8, 'Elephant Valley': 7, 'Lion Rock': 6 };
+    const counts: Record<string, number> = {
+      'Zebra Plains': 8,
+      'Elephant Valley': 7,
+      'Lion Rock': 6,
+      'Giraffe Heights': 6,
+      'Penguin Point': 6,
+      'Monkey Grove': 5,
+    };
     for (const e of this.enclosures) {
       for (let i = 0; i < (counts[e.name] ?? 4); i++) {
         const start = e.randomPoint(1.2, this.rng);
@@ -247,12 +260,74 @@ export class ReverseZoo {
     }
 
     // Animals on the paths, already mid-visit so the scene starts busy.
-    const species: SpeciesId[] = ['zebra', 'zebra', 'zebra', 'zebra', 'elephant', 'elephant', 'lion', 'lion', 'lion'];
+    const species: SpeciesId[] = [
+      ...(['zebra', 'zebra', 'zebra', 'elephant', 'elephant', 'lion', 'lion', 'giraffe', 'giraffe'] as SpeciesId[]),
+      ...(['penguin', 'penguin', 'penguin', 'penguin', 'monkey', 'monkey', 'monkey'] as SpeciesId[]),
+    ];
+    this.buildExtras();
     for (const sp of species) {
       const t = new Tourist(sp);
       this.group.add(t.root);
       this.tourists.push(t);
       this.planTourist(t, true);
+    }
+  }
+
+  /** Snorkelers in the reef lagoon, swim rings in the penguin pool, one-legged people in the flamingo pond. */
+  private buildExtras(): void {
+    const person = () => {
+      const p = buildPerson(this.rng.chance(0.3), false, this.rng.fork('extra'));
+      this.group.add(p.root);
+      return p;
+    };
+    const snorkel = new THREE.MeshStandardMaterial({ color: '#ff9a4d', roughness: 0.5 });
+    for (let i = 0; i < 4; i++) {
+      const p = person();
+      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.35, 6), snorkel);
+      tube.position.set(0.12, 0.3, -0.05);
+      p.head.add(tube);
+      p.root.rotation.order = 'YXZ';
+      const r = 4 + i * 1.6;
+      const speed = 0.12 + i * 0.03;
+      this.extras.push((t) => {
+        // Face down at the surface, gliding around the lagoon and kicking.
+        const a = t * speed + i * 1.7;
+        p.root.position.set(LAGOON.x + Math.cos(a) * r, 1.32, LAGOON.z + Math.sin(a) * r);
+        p.root.rotation.set(Math.PI / 2, Math.atan2(-Math.sin(a), Math.cos(a)), 0);
+        poseSwim(p, t * 6 + i);
+      });
+    }
+    const pool = this.enclosures.find((e) => e.name === 'Penguin Point')?.pond;
+    if (pool) {
+      const ringMat = new THREE.MeshStandardMaterial({ color: '#e8443a', roughness: 0.5 });
+      for (let i = 0; i < 3; i++) {
+        const p = person();
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.11, 8, 16).rotateX(Math.PI / 2), ringMat);
+        ring.position.y = 1.0;
+        p.root.add(ring);
+        p.shoulders.forEach((sh, k) => (sh.rotation.z = (k === 0 ? 1 : -1) * 1.3)); // arms resting on the ring
+        this.extras.push((t) => {
+          const x = pool.x + Math.sin(t * 0.07 + i * 2) * pool.r * 0.5;
+          const z = pool.z + Math.cos(t * 0.05 + i * 1.3) * pool.r * 0.45;
+          p.root.position.set(x, -0.95 + Math.sin(t * 1.5 + i) * 0.05, z);
+          p.root.rotation.y = t * 0.2 + i;
+        });
+      }
+    }
+    for (let i = 0; i < 4; i++) {
+      const p = person();
+      const a = (i / 4) * Math.PI * 2 + 0.5;
+      const x = FLAMINGO_POND.x + Math.cos(a) * 3;
+      const z = FLAMINGO_POND.z + Math.sin(a) * 3;
+      this.extras.push((t) => {
+        // Standing on one leg like a flamingo, arms out for balance.
+        p.root.position.set(x, 0, z);
+        p.root.rotation.y = a + Math.PI + Math.sin(t * 0.3 + i) * 0.3;
+        p.hips[1].rotation.x = -0.6;
+        p.knees[1].rotation.x = 2.3;
+        p.shoulders.forEach((sh, k) => (sh.rotation.z = (k === 0 ? 1 : -1) * (1.3 + Math.sin(t * 2 + i) * 0.15)));
+        p.pose.rotation.z = Math.sin(t * 1.7 + i) * 0.05;
+      });
     }
   }
 
@@ -266,8 +341,8 @@ export class ReverseZoo {
         const d = pick(free);
         plan = { kind: 'view', spot: d.spot, enclosure: d.enclosure };
       }
-    } else if (r < 0.8 && t.species !== 'elephant') {
-      // Elephants don't fit on benches.
+    } else if (r < 0.8 && t.species !== 'elephant' && t.species !== 'giraffe') {
+      // Elephants and giraffes don't fit on benches.
       const free = BENCH_SPOTS.filter((s) => !this.takenTourist.has(s));
       if (free.length) plan = { kind: 'bench', spot: pick(free) };
     }
@@ -308,4 +383,11 @@ export class ReverseZoo {
     const spot = { x: to.x, z: to.z, yaw: Math.random() * Math.PI * 2 };
     p.goVia(route(to), r < 0.8 ? { kind: 'stroll', spot } : { kind: 'rest', spot });
   }
+}
+
+/** Kicking legs and stroking arms for a swimmer lying face down. */
+function poseSwim(p: PersonModel, phase: number): void {
+  p.hips.forEach((h, i) => (h.rotation.x = Math.sin(phase + i * Math.PI) * 0.35));
+  p.knees.forEach((k) => (k.rotation.x = 0.2));
+  p.shoulders.forEach((sh, i) => (sh.rotation.x = -2.6 + Math.sin(phase * 0.5 + i * Math.PI) * 0.6));
 }

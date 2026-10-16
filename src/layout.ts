@@ -28,6 +28,12 @@ export const PATH_RECTS: [number, number, number, number][] = [
 /** The reef lagoon: a round glass-walled tank with a walkway around it. */
 export const LAGOON = { x: 84, z: -6, r: 13, walk: 3.6, name: 'Reef Lagoon' };
 
+/** Shallow flamingo pond just south of the entrance boulevard, behind a low fence. */
+export const FLAMINGO_POND = { x: -32, z: 49, r: 6.5, fence: 9, name: 'Flamingo Pond' };
+
+/** Viewing spots along the boulevard's south edge, facing the pond. */
+export const FLAMINGO_SPOTS: Spot[] = [-38, -35.5, -33, -30.5, -28, -25.5].map((x) => ({ x, z: 39.2, yaw: 0 }));
+
 /** Where visitors stand at the lagoon glass, facing in (skipping the entrance side). */
 export const LAGOON_SPOTS: Spot[] = Array.from({ length: 18 }, (_, i) => -Math.PI / 2 + ((i + 1) * Math.PI * 2) / 20)
   .map((a) => {
@@ -233,5 +239,6 @@ export function isPath(x: number, z: number, margin = 0): boolean {
     if (Math.abs(x - k.x) < k.w / 2 + margin && Math.abs(z - k.z) < k.d / 2 + margin) return true;
   }
   if (Math.hypot(x - LAGOON.x, z - LAGOON.z) < LAGOON.r + LAGOON.walk + margin) return true;
+  if (Math.hypot(x - FLAMINGO_POND.x, z - FLAMINGO_POND.z) < FLAMINGO_POND.fence + 0.5 + margin) return true;
   return Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.r + margin;
 }

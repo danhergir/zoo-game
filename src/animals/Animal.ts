@@ -21,7 +21,13 @@ export type AnimalState =
   | 'toPole'
   | 'climb'
   | 'perch'
-  | 'swing';
+  | 'swing'
+  | 'play'
+  | 'toPond'
+  | 'spray'
+  | 'roll'
+  | 'toRock'
+  | 'bask';
 
 const STATE_LABEL: Record<AnimalState, string> = {
   idle: 'Relaxing',
@@ -38,6 +44,12 @@ const STATE_LABEL: Record<AnimalState, string> = {
   climb: 'Climbing',
   perch: 'Hanging out up high',
   swing: 'Swinging across',
+  play: 'Playing',
+  toPond: 'Off to the water',
+  spray: 'Spraying water',
+  roll: 'Rolling in the dust',
+  toRock: 'Heading for the warm rock',
+  bask: 'Sunbathing on the rock',
 };
 
 /** States an animal can drop when it gets hungry or sleepy. */
@@ -105,6 +117,17 @@ export class Animal {
   private swingT = 0;
   /** Heading up the frame to sleep. */
   private sleepUp = false;
+  /** Babies: siblings to play with, and the sibling being chased (or fled from). */
+  siblings: Animal[] = [];
+  private playWith: Animal | null = null;
+  private chasing = false;
+  private pounce = 0;
+  /** Warm rock: claimed spot on top, the edge we hopped up from, and hop progress (0 = ground, 1 = on top). */
+  private baskSpot = -1;
+  private readonly baskEdge = { x: 0, z: 0 };
+  private hop = 0;
+  /** Elephant water spray and zebra dust puffs (visual particles, shown during those states). */
+  private readonly particles: THREE.InstancedMesh | null = null;
   /** Swimmers: seconds until the next dive, and how long the current dive lasts. */
   private diveIn = 0;
   private diveTime = 0;
@@ -114,7 +137,18 @@ export class Animal {
   private bubbleText = '';
 
   /** `rng` sets this animal's size; seed it the same everywhere. */
-  constructor(species: SpeciesDef, name: string, male: boolean, enclosure: Enclosure, feeder: Feeder, rng: Rng) {
+  /**
+   * `mother` makes this a baby that follows her around.
+   */
+  constructor(
+    species: SpeciesDef,
+    name: string,
+    male: boolean,
+    enclosure: Enclosure,
+    feeder: Feeder,
+    rng: Rng,
+    readonly mother: Animal | null = null,
+  ) {
     this.rng = rng;
     this.species = species;
     this.name = name;
@@ -124,10 +158,29 @@ export class Animal {
 
     this.model = buildModel(species.id, male);
     this.root = this.model.root;
-    const scale = rng.float(0.88, 1.08);
+    const scale = mother ? rng.float(0.45, 0.52) : rng.float(0.88, 1.08);
     this.root.scale.setScalar(scale);
     this.radius = species.radius * scale;
     this.root.userData.pick = { kind: 'animal', animal: this };
+    if (species.sprays || species.rolls) {
+      // Water droplets (elephants) or dust puffs (zebras), positioned in animate().
+      const water = species.sprays !== undefined;
+      this.particles = new THREE.InstancedMesh(
+        new THREE.SphereGeometry(water ? 0.07 : 0.22, 6, 4),
+        new THREE.MeshStandardMaterial({
+          color: water ? '#9fd8f0' : '#cdb78a',
+          transparent: true,
+          opacity: water ? 0.75 : 0.45,
+          depthWrite: false,
+          roughness: 1,
+        }),
+        water ? 24 : 10,
+      );
+      this.particles.visible = false;
+      this.particles.frustumCulled = false;
+      this.particles.raycast = () => {};
+      this.root.add(this.particles);
+    }
 
     this.bubbleEl.className = 'bubble';
     this.bubble = new CSS2DObject(this.bubbleEl);
@@ -168,9 +221,25 @@ export class Animal {
     this.platform = -1;
     this.targetPlatform = -1;
     this.sleepUp = false;
+    this.playWith = null;
+    this.chasing = false;
+    this.pounce = 0;
+    this.baskSpot = -1;
+    this.hop = 0;
     this.state = 'sleep';
     this.stateTime = 0;
     this.moveTime = 0;
+    // Babies start the day asleep next to their mother.
+    if (this.mother) {
+      const m = this.mother.position;
+      const a = rng.float(0, Math.PI * 2);
+      const d = this.mother.radius + this.radius + 0.2;
+      this.root.position.set(m.x + Math.cos(a) * d, 0, m.z + Math.sin(a) * d);
+      if (!this.enclosure.walkable(this.root.position.x, this.root.position.z, this.radius)) {
+        this.root.position.set(m.x, 0, m.z);
+      }
+      return;
+    }
     // Climbers start the day asleep up on the frame, where they spent the night.
     const g = this.enclosure.gym;
     if (this.species.climb && g) {
@@ -185,6 +254,16 @@ export class Animal {
         this.root.position.y = p.h;
       }
     }
+  }
+
+  /** Facing direction (babies line up beside their mother). */
+  get heading(): number {
+    return this.yaw;
+  }
+
+  /** Off the ground (on the climbing frame or the warm rock): skip ground-level spacing. */
+  get offGround(): boolean {
+    return this.platform >= 0 || this.elevation > 0.05;
   }
 
   /** Up on the climbing frame (monkeys). */
@@ -222,6 +301,13 @@ export class Animal {
 
   update(dt: number, hour: number): void {
     this.time += dt;
+    if (this.mother) {
+      this.updateBaby(dt);
+      this.root.position.y = this.elevation;
+      this.animate(dt);
+      this.updateBubble();
+      return;
+    }
     this.updateNeeds(dt);
     this.checkInterrupts(hour);
 
@@ -251,6 +337,17 @@ export class Animal {
         break;
       case 'swing':
         this.swing(dt, hour);
+        break;
+      case 'toPond':
+      case 'toRock':
+        this.walk(dt, hour);
+        break;
+      case 'spray':
+      case 'roll':
+        if (this.stateTime <= 0) this.decide(hour);
+        break;
+      case 'bask':
+        this.bask(dt, hour);
         break;
       case 'greet':
         this.greet(dt, hour);
@@ -285,7 +382,7 @@ export class Animal {
 
   /** Called by the separation pass; keeps the animal inside its fence. */
   nudge(dx: number, dz: number): void {
-    if (this.aloft) return;
+    if (this.offGround) return;
     const p = this.root.position;
     if (this.enclosure.walkable(p.x + dx, p.z + dz, this.radius, this.swims)) {
       p.x += dx;
@@ -360,6 +457,12 @@ export class Animal {
       // Walking over to see the visitors.
     } else if (s.browse && this.enclosure.trees.length && this.rng.chance(s.browse) && this.goToTree()) {
       // Off to eat leaves.
+    } else if (s.basks && hour > 11 && hour < 15.5 && this.rng.chance(s.basks) && this.goToRock()) {
+      // Off to sunbathe.
+    } else if (s.sprays && hour > 9 && hour < 18 && this.enclosure.pond && this.rng.chance(s.sprays) && this.goToPond()) {
+      // Off for a shower.
+    } else if (s.rolls && this.rng.chance(s.rolls)) {
+      this.setState('roll', 5);
     } else if (s.climb && this.enclosure.gym && this.rng.chance(s.climb) && this.goToPole(false)) {
       // Off to the climbing frame.
     } else if (s.swim && this.enclosure.pond && this.rng.chance(s.swim)) {
@@ -392,6 +495,157 @@ export class Animal {
     const r = this.rng.float(0.3, 1.8);
     this.target.set(h.x + Math.cos(a) * r, 0, h.z + Math.sin(a) * r);
     this.setState('toBed');
+  }
+
+  /** Walk to the pond's edge, facing the water, for a trunk shower. */
+  private goToPond(): boolean {
+    const pond = this.enclosure.pond!;
+    for (let k = 0; k < 8; k++) {
+      const a = this.rng.float(0, Math.PI * 2);
+      const d = pond.r * 1.12 + this.radius * 0.6 + 0.4;
+      const x = pond.x + Math.cos(a) * d;
+      const z = pond.z + Math.sin(a) * d;
+      if (!this.enclosure.walkable(x, z, this.radius)) continue;
+      this.target.set(x, 0, z);
+      this.setState('toPond');
+      return true;
+    }
+    return false;
+  }
+
+  /** Claim a free spot on the warm rock and walk to the edge below it. */
+  private goToRock(): boolean {
+    const rock = this.enclosure.warmRock;
+    if (!rock) return false;
+    const free = rock.spots.map((_, i) => i).filter((i) => !this.enclosure.baskTaken.has(i));
+    if (!free.length) return false;
+    const i = this.rng.pick(free);
+    const s = rock.spots[i];
+    const dx = s.x - rock.x;
+    const dz = s.z - rock.z;
+    const len = Math.hypot(dx, dz) || 1;
+    const d = rock.r + this.radius * 0.6 + 0.3;
+    const ex = rock.x + (dx / len) * d;
+    const ez = rock.z + (dz / len) * d;
+    if (!this.enclosure.walkable(ex, ez, this.radius)) return false;
+    this.enclosure.baskTaken.add(i);
+    this.baskSpot = i;
+    this.baskEdge.x = ex;
+    this.baskEdge.z = ez;
+    this.target.set(ex, 0, ez);
+    this.setState('toRock');
+    return true;
+  }
+
+  /** Hop up onto the rock, lie in the sun, hop back down. */
+  private bask(dt: number, hour: number): void {
+    const rock = this.enclosure.warmRock!;
+    const spot = rock.spots[this.baskSpot];
+    const leaving = this.stateTime <= 0 || (this.hunger < this.species.hungryAt && this.feeder.hasFood) || this.isBedtime(hour);
+    this.hop = THREE.MathUtils.clamp(this.hop + (leaving ? -dt : dt) * 2.5, 0, 1);
+    const p = this.root.position;
+    p.x = THREE.MathUtils.lerp(this.baskEdge.x, spot.x, this.hop);
+    p.z = THREE.MathUtils.lerp(this.baskEdge.z, spot.z, this.hop);
+    this.elevation = rock.h * Math.sin((this.hop * Math.PI) / 2);
+    this.yaw = lerpAngle(this.yaw, spot.yaw, 1 - Math.exp(-dt * 3));
+    if (leaving && this.hop === 0) {
+      this.enclosure.baskTaken.delete(this.baskSpot);
+      this.baskSpot = -1;
+      this.elevation = 0;
+      this.decide(hour);
+    }
+  }
+
+  /**
+   * Babies stay by their mother: walk at her side, sleep next to her, and
+   * (lion cubs) chase each other around her. They nurse, so they're as fed
+   * and content as she is.
+   */
+  private updateBaby(dt: number): void {
+    const mom = this.mother!;
+    this.hunger = mom.hunger;
+    this.energy = mom.energy;
+    this.happiness = Math.min(1, mom.happiness + 0.05);
+    this.pounce = Math.max(0, this.pounce - dt);
+    const p = this.root.position;
+
+    // Mom asleep (or up somewhere): curl up right beside her.
+    const momResting = mom.state === 'sleep' || mom.offGround;
+    let goal: { x: number; z: number };
+    let speed = this.species.speed * 1.4;
+    if (this.playWith && (momResting || this.stateTime <= 0)) this.stopPlaying();
+    if (!momResting && !this.playWith && this.siblings.length && this.rng.chance(dt * 0.06)) {
+      // Start a game of chase with a sibling.
+      const sib = this.rng.pick(this.siblings);
+      if (!sib.playWith) {
+        this.playWith = sib;
+        sib.playWith = this;
+        this.chasing = true;
+        sib.chasing = false;
+        this.setState('play', this.rng.float(6, 11));
+        sib.state = 'play';
+        sib.stateTime = this.stateTime;
+      }
+    }
+    this.stateTime -= dt;
+    if (this.playWith) {
+      if (this.chasing) {
+        goal = this.playWith.root.position;
+        if (Math.hypot(goal.x - p.x, goal.z - p.z) < this.radius * 2.2) {
+          // Caught! Pounce, then it's the other cub's turn to chase.
+          this.pounce = 0.5;
+          this.chasing = false;
+          this.playWith.chasing = true;
+        }
+      } else {
+        // Run circles around mom.
+        const a = this.time * 0.9 + (this.name.length % 3);
+        const r = mom.radius + 2.5;
+        goal = { x: mom.position.x + Math.cos(a) * r, z: mom.position.z + Math.sin(a) * r };
+      }
+      speed *= 1.2;
+    } else {
+      // Beside mom, a little behind her shoulder.
+      const side = this.name.length % 2 ? 1 : -1;
+      const off = mom.radius + this.radius + 0.25;
+      const c = Math.cos(mom.heading);
+      const sn = Math.sin(mom.heading);
+      const lx = side * off;
+      const lz = -0.3 * off;
+      goal = { x: mom.position.x + lx * c + lz * sn, z: mom.position.z - lx * sn + lz * c };
+    }
+
+    const dx = goal.x - p.x;
+    const dz = goal.z - p.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > 0.3) {
+      const desired = Math.atan2(dx, dz);
+      this.yaw = lerpAngle(this.yaw, desired, 1 - Math.exp(-dt * 6));
+      const step = Math.min(dist, speed * Math.min(1, dist) * dt);
+      const nx = p.x + Math.sin(this.yaw) * step;
+      const nz = p.z + Math.cos(this.yaw) * step;
+      if (this.enclosure.walkable(nx, nz, this.radius)) {
+        p.x = nx;
+        p.z = nz;
+      } else {
+        this.slide(nx - p.x, nz - p.z, dx, dz);
+      }
+      this.walking = step > 0.002;
+      this.stride += (step / (this.model.legLength * this.root.scale.x)) * 1.7;
+    } else {
+      this.walking = false;
+      this.yaw = lerpAngle(this.yaw, mom.heading, 1 - Math.exp(-dt * 2));
+    }
+    if (!this.playWith) this.state = momResting && dist < 1 ? 'sleep' : this.walking ? 'wander' : 'idle';
+  }
+
+  private stopPlaying(): void {
+    if (this.playWith) {
+      this.playWith.playWith = null;
+      this.playWith.state = 'idle';
+    }
+    this.playWith = null;
+    this.state = 'idle';
   }
 
   /** Walk to the foot of a pole whose platform has room (at most two monkeys per platform). */
@@ -592,7 +846,7 @@ export class Animal {
     this.state = state;
     this.stateTime = duration;
     this.moveTime = 0;
-    if (['wander', 'toFeeder', 'toFence', 'toTree', 'toBed', 'toPole'].includes(state)) {
+    if (['wander', 'toFeeder', 'toFence', 'toTree', 'toBed', 'toPole', 'toPond', 'toRock'].includes(state)) {
       this.path = this.enclosure.findPath(this.root.position, this.target, this.radius, this.swims) ?? [this.target.clone()];
     }
   }
@@ -619,6 +873,19 @@ export class Animal {
       else if (this.state === 'toTree' && arrived && dist < 1) this.setState('browse', this.rng.float(6, 12));
       else if (this.state === 'toBed') this.setState('sleep');
       else if (this.state === 'toPole' && arrived && dist < 1) this.startClimbUp(this.targetPlatform);
+      else if (this.state === 'toPond' && arrived && dist < 1) {
+        const pond = this.enclosure.pond!;
+        this.yaw = Math.atan2(pond.x - this.root.position.x, pond.z - this.root.position.z);
+        this.setState('spray', this.rng.float(7, 11));
+      } else if (this.state === 'toRock' && arrived && dist < 1) {
+        this.hop = 0;
+        this.setState('bask', this.rng.float(15, 30));
+      } else if (this.state === 'toRock') {
+        // Didn't make it: give the spot back.
+        this.enclosure.baskTaken.delete(this.baskSpot);
+        this.baskSpot = -1;
+        this.setState('idle', this.rng.float(1, 4));
+      }
       else this.setState('idle', this.rng.float(1, 4));
       return;
     }
@@ -696,7 +963,7 @@ export class Animal {
     const eating = this.state === 'eat';
     const greeting = this.state === 'greet';
     const browsing = this.state === 'browse';
-    if (!['wander', 'toFeeder', 'toFence', 'toTree', 'toBed', 'toPole'].includes(this.state)) {
+    if (!['wander', 'toFeeder', 'toFence', 'toTree', 'toBed', 'toPole', 'toPond', 'toRock', 'play'].includes(this.state) && !this.mother) {
       this.walking = false;
     }
 
@@ -704,7 +971,10 @@ export class Animal {
 
     // Penguins sleep standing up; in the water everyone tucks their legs.
     const swimming = this.swimming;
-    const lying = asleep && !this.species.huddles;
+    const rolling = this.state === 'roll';
+    const basking = this.state === 'bask';
+    const spraying = this.state === 'spray';
+    const lying = (asleep && !this.species.huddles) || rolling || basking;
     poseLegs(m, k, lying || swimming ? 'lie' : this.walking ? 'walk' : 'stand', this.stride);
 
     // Swimmers dive now and then: under for a moment, then back up.
@@ -718,12 +988,18 @@ export class Animal {
     }
     const bob = this.walking ? Math.abs(Math.sin(this.stride)) * 0.05 * L : 0;
     let poseY = lying ? -L * 0.85 : bob;
+    // Cubs at play: a little hop on the pounce.
+    if (this.pounce > 0) poseY += Math.sin(((0.5 - this.pounce) / 0.5) * Math.PI) * 0.25;
     if (swimming) poseY = this.diveTime > 0 ? -0.5 : -0.12 + Math.sin(this.time * 3) * 0.03;
     m.pose.position.y = lerp(m.pose.position.y, poseY, asleep ? k * 0.3 : k);
     // Swimming: body flat in the water. Waddling: rock side to side.
     m.pose.rotation.x = lerp(m.pose.rotation.x, swimming ? 1.35 : 0, k);
     const waddle = m.waddle && this.walking && !swimming ? Math.sin(this.stride) * 0.16 : 0;
-    m.pose.rotation.z = lerp(m.pose.rotation.z, waddle, k);
+    // Dust bath: roll over onto the back and back again, legs kicking.
+    const rollT = rolling ? THREE.MathUtils.clamp(1 - this.stateTime / 5, 0, 1) : 0;
+    const roll = rolling ? Math.sin(rollT * Math.PI) * 2.5 * (this.name.length % 2 ? 1 : -1) : 0;
+    m.pose.rotation.z = lerp(m.pose.rotation.z, waddle + roll, rolling ? 0.2 : k);
+    if (rolling) m.legs.forEach((leg, i) => (leg.hip.rotation.x += Math.sin(this.time * 12 + i) * 0.25));
     m.flippers.forEach((f, i) => {
       const side = i === 0 ? 1 : -1;
       let spread = 0.18;
@@ -747,6 +1023,8 @@ export class Animal {
     else if (greeting && this.treatTime > 0) pitch = m.eatPitch * 0.5 + Math.sin(this.time * 9) * 0.1;
     else if (greeting) pitch = 0.12 + Math.sin(this.time * 1.5) * 0.05;
     else if (browsing) pitch = -0.4 + Math.sin(this.time * 6) * 0.06; // reaching up, chewing
+    else if (basking) pitch = -0.1 + Math.sin(this.time * 0.8) * 0.05; // head up, eyes half closed
+    else if (spraying) pitch = (this.time % 2.6) / 2.6 < 0.35 ? 0.35 : -0.2;
     else if (asleep) pitch = 0.35;
     else if (this.walking) pitch = Math.sin(this.stride * 2) * 0.05;
     m.head.rotation.x = lerp(m.head.rotation.x, pitch, k);
@@ -757,9 +1035,10 @@ export class Animal {
     m.trunk.forEach((seg, i) => {
       let curl = -0.04 + Math.sin(this.time * 1.1 - i * 0.5) * 0.07;
       if (eating) curl = 0.12 + Math.sin(this.time * 2.2 - i * 0.4) * 0.28;
+      else if (spraying) curl = (this.time % 2.6) / 2.6 < 0.35 ? 0.35 : -0.55; // dip in the water, then up over the head
       else if (greeting && this.treatTime > 0) curl = 0.38;
       else if (greeting) curl = -0.3 + Math.sin(this.time * 1.6 - i * 0.5) * 0.08;
-      seg.rotation.x = lerp(seg.rotation.x, curl, k);
+      seg.rotation.x = lerp(seg.rotation.x, curl, spraying ? Math.min(1, k * 2.5) : k);
       seg.rotation.z = Math.sin(this.time * 0.8 - i * 0.6) * 0.05;
     });
     // Long necks (giraffes): base segment sets the lean, the rest add curve.
@@ -774,9 +1053,48 @@ export class Animal {
       m.neck.forEach((seg, i) => (seg.rotation.x = lerp(seg.rotation.x, i === 0 ? base : rest, k * 0.6)));
     }
     if (this.species.climb !== undefined) this.poseClimber(k);
+    this.updateParticles(spraying, rolling ? rollT : -1);
     for (const ear of m.ears) {
       ear.pivot.rotation.y = ear.rest + Math.sign(ear.rest) * Math.sin(this.time * 1.7) * 0.18;
     }
+  }
+
+  /**
+   * Elephant shower: droplets arcing from the raised trunk back over the body.
+   * Zebra dust bath: puffs billowing around the body while it rolls.
+   */
+  private updateParticles(spraying: boolean, rollT: number): void {
+    const p = this.particles;
+    if (!p) return;
+    const phase = (this.time % 2.6) / 2.6;
+    const showSpray = spraying && phase > 0.55;
+    p.visible = showSpray || rollT >= 0;
+    if (!p.visible) return;
+    const m = new THREE.Matrix4();
+    const count = p.count;
+    for (let j = 0; j < count; j++) {
+      let x: number;
+      let y: number;
+      let z: number;
+      let s: number;
+      if (showSpray) {
+        const u = (((phase - 0.55) / 0.45) * 1.6 + j / count) % 1;
+        x = Math.sin(j * 2.39) * 0.35 * u;
+        y = 4.1 + 1.6 * u - 3.2 * u * u;
+        z = 0.9 - 2.6 * u;
+        s = 1;
+      } else {
+        const u = (rollT * 2 + j / count) % 1;
+        const a = j * 0.63;
+        x = Math.cos(a) * (0.8 + 0.6 * u);
+        y = 0.2 + 0.5 * u;
+        z = Math.sin(a) * (0.8 + 0.6 * u);
+        s = 0.6 + 1.2 * u;
+      }
+      m.makeScale(s, s, s).setPosition(x, y, z);
+      p.setMatrixAt(j, m);
+    }
+    p.instanceMatrix.needsUpdate = true;
   }
 
   /**

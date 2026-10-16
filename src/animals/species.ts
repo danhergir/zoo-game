@@ -34,6 +34,12 @@ export interface SpeciesDef {
   parade?: boolean;
   /** Chance to head for the climbing frame when idle (monkeys); they sleep up there too. */
   climb?: number;
+  /** Chance to go spray water from the pond when idle (elephants). */
+  sprays?: number;
+  /** Chance to roll in the dust when idle (zebras). */
+  rolls?: number;
+  /** Chance to sunbathe on the warm rock around midday (lions). */
+  basks?: number;
   names: string[];
 }
 
@@ -51,6 +57,7 @@ export const SPECIES: Record<SpeciesId, SpeciesDef> = {
     hungryAt: 0.45,
     idleChance: 0.4,
     curiosity: 0.4,
+    rolls: 0.12,
     names: ['Ziggy', 'Marty', 'Stripe', 'Zuri', 'Domino', 'Pepper', 'Ozzy', 'Nala'],
   },
   elephant: {
@@ -66,6 +73,7 @@ export const SPECIES: Record<SpeciesId, SpeciesDef> = {
     hungryAt: 0.5,
     idleChance: 0.45,
     curiosity: 0.5,
+    sprays: 0.18,
     names: ['Dumbo', 'Tembo', 'Ellie', 'Babar', 'Kibo', 'Mosi'],
   },
   giraffe: {
@@ -131,6 +139,7 @@ export const SPECIES: Record<SpeciesId, SpeciesDef> = {
     hungryAt: 0.4,
     idleChance: 0.7,
     curiosity: 0.3,
+    basks: 0.5,
     names: ['Simba', 'Leo', 'Kiara', 'Sarabi', 'Aslan', 'Zira', 'Kovu'],
   },
 };

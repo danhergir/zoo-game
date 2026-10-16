@@ -4,11 +4,12 @@ import { Animal } from './animals/Animal';
 import { SPECIES } from './animals/species';
 import { CameraRig } from './camera';
 import { DAY_SECONDS, HOUR_SECONDS, RESET_HOUR, lastReset, zooTime } from './clock';
+import { Flamingos } from './flamingos';
 import { Lagoon } from './lagoon';
 import { Enclosure } from './enclosure';
 import { Feeder } from './feeder';
 import { HABITATS } from './habitats';
-import { DECKS, LAGOON, isPath } from './layout';
+import { DECKS, FLAMINGO_POND, LAGOON, isPath } from './layout';
 import { Picker } from './picking';
 import { ReverseZoo } from './reverse';
 import { Rng, withSeededRandom } from './rng';
@@ -39,6 +40,7 @@ world.scene.add(live);
 const enclosures: Enclosure[] = [];
 const feeders: Feeder[] = [];
 const animals: Animal[] = [];
+const babies: Animal[] = [];
 
 // Fixed seeds: same rocks, trees, names and animal sizes for everyone.
 const worldRng = new Rng('tiny-zoo:animals');
@@ -58,15 +60,29 @@ for (const h of HABITATS) {
     const j = worldRng.int(i + 1);
     [names[i], names[j]] = [names[j], names[i]];
   }
+  const adults: Animal[] = [];
   for (let i = 0; i < h.count; i++) {
     const animal = new Animal(species, names[i % names.length], i < h.males, enclosure, feeder, worldRng.fork('animal'));
     live.add(animal.root);
-    animals.push(animal);
+    adults.push(animal);
   }
+  babies.push(
+    ...Array.from({ length: h.babies ?? 0 }, (_, b) => {
+      const mom = adults[h.males + worldRng.int(h.count - h.males)];
+      const baby = new Animal(species, names[(h.count + b) % names.length], worldRng.chance(0.5), enclosure, feeder, worldRng.fork('baby'), mom);
+      live.add(baby.root);
+      return baby;
+    }),
+  );
+  animals.push(...adults);
 }
+// Babies go last so their mothers are placed first at each reset; siblings play together.
+for (const b of babies) b.siblings = babies.filter((x) => x !== b && x.enclosure === b.enclosure);
+animals.push(...babies);
 
 const lagoon = new Lagoon(LAGOON.x, LAGOON.z);
-world.scene.add(lagoon.group);
+const flamingos = new Flamingos(FLAMINGO_POND.x, FLAMINGO_POND.z, FLAMINGO_POND.r, FLAMINGO_POND.fence);
+world.scene.add(lagoon.group, flamingos.group);
 
 withSeededRandom('tiny-zoo:plants', () =>
   world.decorate(
@@ -176,7 +192,7 @@ function separate(): void {
     for (let j = i + 1; j < animals.length; j++) {
       const a = animals[i];
       const b = animals[j];
-      if (a.enclosure !== b.enclosure || a.aloft || b.aloft) continue;
+      if (a.enclosure !== b.enclosure || a.offGround || b.offGround) continue;
       const dx = b.position.x - a.position.x;
       const dz = b.position.z - a.position.z;
       const d = Math.hypot(dx, dz);
@@ -212,6 +228,7 @@ function resetSimulation(index: number): void {
   const seed = (name: string) => new Rng(`tiny-zoo:reset ${index}:${name}`);
   for (const e of enclosures) {
     e.takenSpots.clear();
+    e.baskTaken.clear();
     e.gym?.occupants.fill(0);
   }
   animals.forEach((a, i) => a.reset(seed(`animal ${i}`)));
@@ -268,6 +285,7 @@ const zooSeconds = () => ((simReset % 1000) + 1000) % 1000 * DAY_SECONDS + simSt
 function frame(dt: number): void {
   for (const f of feeders) f.syncVisuals();
   lagoon.update(zooSeconds());
+  flamingos.update(zooSeconds(), state.hour);
   const selected = inspector.selected;
   if (selected) {
     ring.position.set(selected.position.x, 0.05, selected.position.z);

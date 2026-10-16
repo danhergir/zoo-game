@@ -35,6 +35,8 @@ export interface HabitatDef {
   species: SpeciesId;
   count: number;
   males: number;
+  /** Young that follow a mother around. */
+  babies?: number;
   /** The viewing deck in front of this enclosure. */
   deck: DeckDef;
 }
@@ -54,6 +56,7 @@ export const HABITATS: HabitatDef[] = [
     species: 'zebra',
     count: 4,
     males: 2,
+    babies: 1,
     deck: {
       x: -7.1,
       z: 0,
@@ -79,6 +82,7 @@ export const HABITATS: HabitatDef[] = [
     species: 'elephant',
     count: 2,
     males: 1,
+    babies: 1,
     deck: {
       x: 7.3,
       z: 1,
@@ -99,11 +103,13 @@ export const HABITATS: HabitatDef[] = [
       trees: 1,
       keepClear: [[0, -38.6, 3]],
       pond: [-9, -55, 3],
+      warmRock: [8, -50],
     },
     feeder: { food: 'meat', position: [0, -38.6], capacity: 100, radius: 1.2 },
     species: 'lion',
     count: 3,
     males: 1,
+    babies: 2,
     deck: {
       x: 0,
       z: -34.85,

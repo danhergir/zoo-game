@@ -47,7 +47,8 @@ export class Inspector {
   show(animal: Animal): void {
     this.animal = animal;
     this.titleEl.textContent = animal.name;
-    this.subEl.textContent = `${animal.male ? '♂' : '♀'} ${animal.species.label} · ${animal.enclosure.name}`;
+    const kind = animal.mother ? `Baby ${animal.species.label.toLowerCase()}` : animal.species.label;
+    this.subEl.textContent = `${animal.male ? '♂' : '♀'} ${kind} · ${animal.enclosure.name}`;
     this.panel.classList.remove('hidden');
     this.update(false);
   }

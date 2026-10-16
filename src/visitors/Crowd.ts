@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Animal } from '../animals/Animal';
-import { BOULEVARD_Z, DECKS, EXIT_X, LAGOON, LAGOON_SPOTS, PLAZA, SEATS, type Spot } from '../layout';
+import { BOULEVARD_Z, DECKS, EXIT_X, FLAMINGO_POND, FLAMINGO_SPOTS, LAGOON, LAGOON_SPOTS, PLAZA, SEATS, type Spot } from '../layout';
 import { Rng } from '../rng';
 import { Visitor, type Activity } from './Visitor';
 
@@ -196,6 +196,9 @@ export class Crowd {
     // The reef lagoon's glass is a popular spot.
     for (const spot of LAGOON_SPOTS) {
       if (!this.taken.has(spot)) options.push({ activity: { kind: 'view', spot, enclosure: LAGOON.name }, weight: 1.5 });
+    }
+    for (const spot of FLAMINGO_SPOTS) {
+      if (!this.taken.has(spot)) options.push({ activity: { kind: 'view', spot, enclosure: FLAMINGO_POND.name }, weight: 1.2 });
     }
     let r = this.rng.next() * options.reduce((s, o) => s + o.weight, 0);
     for (const o of options) {

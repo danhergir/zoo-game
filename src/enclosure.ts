@@ -20,6 +20,8 @@ export interface EnclosureDef {
   glass?: boolean;
   /** Icy look: pale shore, no reeds (penguins). */
   icy?: boolean;
+  /** A big flat rock at [x, z] that animals sunbathe on (lions). */
+  warmRock?: [number, number];
   /** A climbing frame centered at [x, z] (monkeys). */
   jungleGym?: [number, number];
   /** Where the group gathers to sleep, as [x, z] (penguins huddle). */
@@ -73,6 +75,10 @@ export class Enclosure {
   /** Climbing frame: platforms on poles, joined by ropes. `occupants` counts monkeys per platform. */
   gym: { platforms: { x: number; z: number; h: number }[]; ropes: [number, number][]; occupants: number[] } | null = null;
 
+  /** The warm rock: top height, and spots on top for sunbathers (claimed in `baskTaken`). */
+  warmRock: { x: number; z: number; r: number; h: number; spots: { x: number; z: number; yaw: number }[] } | null = null;
+  readonly baskTaken = new Set<number>();
+
   /** Icy ground: no plants grow here. */
   get icy(): boolean {
     return this.def.icy === true;
@@ -110,6 +116,7 @@ export class Enclosure {
     for (const [x, z, r] of def.keepClear ?? []) this.obstacles.push({ x, z, r, solid: false });
     if (def.pond) this.addPond(...def.pond);
     if (def.jungleGym) this.addJungleGym(...def.jungleGym);
+    if (def.warmRock) this.addWarmRock(...def.warmRock);
     for (let i = 0; i < (def.rocks ?? 0); i++) this.addRock();
     for (let i = 0; i < (def.trees ?? 0); i++) this.addTree(def.tallTrees ? 1.45 : 1);
     // Everything in an enclosure is static: bake it into a handful of meshes.
@@ -256,6 +263,19 @@ export class Enclosure {
         this.group.add(rail);
       }
     }
+  }
+
+  /** A broad, flat-topped boulder; three spots on top for animals to lie in the sun. */
+  private addWarmRock(x: number, z: number): void {
+    const r = 2.4;
+    const h = 0.62;
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 1).scale(1, h / r, 1), rockMat);
+    rock.position.set(x, 0, z);
+    rock.castShadow = rock.receiveShadow = true;
+    this.group.add(rock);
+    this.obstacles.push({ x, z, r: r * 0.95, solid: true });
+    const spots = [0, 2.1, 4.2].map((a) => ({ x: x + Math.cos(a) * 0.95, z: z + Math.sin(a) * 0.95, yaw: Math.atan2(Math.cos(a), Math.sin(a)) }));
+    this.warmRock = { x, z, r, h, spots };
   }
 
   /**

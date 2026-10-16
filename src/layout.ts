@@ -23,7 +23,72 @@ export const PATH_RECTS: [number, number, number, number][] = [
   [-48.5, -29.5, 79, 6], // west wing
   [48.5, -29.5, 79, 6], // east wing
   [84, -24.25, 5, 4.6], // from the east wing up to the reef lagoon
+  // Pads joining the amenities south of the boulevard (and the wing cart) to the paths.
+  [-12, 40.2, 4, 4.4], // ice cream kiosk
+  [12, 40.2, 4, 4.4], // food stand
+  [28, 40.2, 5, 4.4], // gift shop
+  [44, 40, 14, 4], // playground
+  [-53, 40.5, 8, 5], // picnic area
+  [30, -25.6, 3.4, 1.8], // ice cream cart on the east wing
 ];
+
+/** Grass and sand areas people may walk on (no paving drawn): playground and picnic lawn. */
+export const OPEN_AREAS: [number, number, number, number][] = [
+  [44, 47, 14, 11],
+  [-53, 47.5, 12, 9],
+];
+
+export type StandItem = 'icecream' | 'hotdog' | 'balloon';
+
+/** Snack stands: where they are, which way the counter faces, what they sell, and their queue (front first). */
+export interface Stand {
+  name: string;
+  x: number;
+  z: number;
+  /** Visitors in line face this way. */
+  yaw: number;
+  sells: StandItem[];
+  queue: Spot[];
+}
+
+const queueLine = (x: number, z: number, dz: number): Spot[] =>
+  [0, 1, 2, 3].map((i) => ({ x, z: z + dz * i, yaw: dz < 0 ? 0 : Math.PI }));
+
+export const STANDS: Stand[] = [
+  { name: 'Ice cream kiosk', x: -12, z: 42.6, yaw: 0, sells: ['icecream', 'balloon'], queue: queueLine(-12, 40.4, -1.2) },
+  { name: 'Food stand', x: 12, z: 42.6, yaw: 0, sells: ['hotdog', 'icecream'], queue: queueLine(12, 40.4, -1.2) },
+  { name: 'Ice cream cart', x: 30, z: -24.1, yaw: 0, sells: ['icecream', 'balloon'], queue: queueLine(30, -25.9, -1.1) },
+];
+
+/** Gift shop by the entrance; visitors stop at the door on their way out. */
+export const GIFT_SHOP = { x: 28, z: 45, w: 7, d: 5, door: { x: 28, z: 41.7, yaw: 0 } as Spot };
+
+/** Playground: two swings, a slide and a sandbox. */
+export const PLAYGROUND = {
+  swings: [40.3, 41.9].map((x) => ({ x, z: 48, yaw: 0 }) as Spot),
+  slide: { ladder: { x: 47, z: 45.2, yaw: 0 } as Spot, top: 1.6, bottom: { x: 47, z: 49.4 } },
+  sandbox: [
+    { x: 43.4, z: 50.6, yaw: 0.4 },
+    { x: 44.6, z: 51.4, yaw: 3.6 },
+    { x: 45.2, z: 50.4, yaw: -1.2 },
+  ] as Spot[],
+};
+
+/** Picnic tables: four seats each, facing the table. */
+export const PICNIC_TABLES: { x: number; z: number }[] = [
+  { x: -56, z: 45 },
+  { x: -50, z: 45 },
+  { x: -53, z: 50.5 },
+];
+export const PICNIC_SEATS: Spot[][] = PICNIC_TABLES.map((t) =>
+  [-0.5, 0.5].flatMap((dx) => [
+    { x: t.x + dx, z: t.z - 0.8, yaw: 0 },
+    { x: t.x + dx, z: t.z + 0.8, yaw: Math.PI },
+  ]),
+);
+
+/** The zoo train's loop: an ellipse around everything. */
+export const TRAIN_TRACK = { x: 0, z: -15, rx: 116, rz: 100 };
 
 /** The reef lagoon: a round glass-walled tank with a walkway around it. */
 export const LAGOON = { x: 84, z: -6, r: 13, walk: 3.6, name: 'Reef Lagoon' };
@@ -237,6 +302,13 @@ export function isPath(x: number, z: number, margin = 0): boolean {
   }
   for (const k of [...DECKS, STAFF_HUT]) {
     if (Math.abs(x - k.x) < k.w / 2 + margin && Math.abs(z - k.z) < k.d / 2 + margin) return true;
+  }
+  // The train track's gravel bed.
+  const t = TRAIN_TRACK;
+  const rho = Math.hypot((x - t.x) / t.rx, (z - t.z) / t.rz);
+  if (Math.abs(rho - 1) * Math.min(t.rx, t.rz) < 1.6 + margin) return true;
+  for (const [cx, cz, w, d] of OPEN_AREAS) {
+    if (Math.abs(x - cx) < w / 2 + margin && Math.abs(z - cz) < d / 2 + margin) return true;
   }
   if (Math.hypot(x - LAGOON.x, z - LAGOON.z) < LAGOON.r + LAGOON.walk + margin) return true;
   if (Math.hypot(x - FLAMINGO_POND.x, z - FLAMINGO_POND.z) < FLAMINGO_POND.fence + 0.5 + margin) return true;

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Feeder } from '../feeder';
-import { routeOnPaths, type Spot } from '../layout';
+import { PLAYGROUND, routeOnPaths, type Spot, type StandItem } from '../layout';
 import type { Rng } from '../rng';
 import { buildPerson, type PersonModel } from './person';
 
@@ -10,7 +10,23 @@ export type Activity =
   | { kind: 'stroll'; spot: Spot }
   | { kind: 'feed'; spot: Spot; feeder: Feeder }
   | { kind: 'rest'; spot: Spot }
+  | { kind: 'queue'; spot: Spot; stand: number; front: boolean }
+  | { kind: 'shop'; spot: Spot }
+  | { kind: 'swing'; spot: Spot; seat: number }
+  | { kind: 'slide'; spot: Spot }
+  | { kind: 'dig'; spot: Spot }
+  | { kind: 'picnic'; spot: Spot }
+  | { kind: 'supervise'; spot: Spot }
+  | { kind: 'follow'; spot: Spot }
   | { kind: 'exit'; spot: Spot };
+
+/** Something a visitor walks around with. */
+export type Item = StandItem | 'plush';
+
+const SWING_PIVOT_Y = 2.3;
+const SWING_ROPE = 1.67;
+/** Seconds per slide loop: climb, sit at the top, slide down, walk back round. */
+const SLIDE_LOOP = 6;
 
 type Phase = 'walking' | 'busy' | 'leaving' | 'done';
 type Gesture = 'photo' | 'point' | 'wave';
@@ -21,6 +37,10 @@ const propMats = {
   phone: new THREE.MeshStandardMaterial({ color: '#22252b', roughness: 0.4 }),
   flash: new THREE.MeshBasicMaterial({ color: '#ffffff' }),
   carrot: new THREE.MeshStandardMaterial({ color: '#f28c28', roughness: 0.7 }),
+  wafer: new THREE.MeshStandardMaterial({ color: '#d9a05b', roughness: 0.8 }),
+  bun: new THREE.MeshStandardMaterial({ color: '#e3b170', roughness: 0.8 }),
+  sausage: new THREE.MeshStandardMaterial({ color: '#b8452f', roughness: 0.6 }),
+  string: new THREE.MeshBasicMaterial({ color: '#dddddd' }),
   leaf: new THREE.MeshStandardMaterial({ color: '#4f9a3a', roughness: 0.8 }),
   apple: new THREE.MeshStandardMaterial({ color: '#d63a32', roughness: 0.5 }),
   twig: new THREE.MeshStandardMaterial({ color: '#6e4b2e', roughness: 0.9 }),
@@ -33,7 +53,20 @@ const propGeo = {
   apple: new THREE.SphereGeometry(0.07, 10, 8),
   twig: new THREE.CylinderGeometry(0.015, 0.02, 0.45, 5).rotateX(Math.PI / 2),
   leafBlade: new THREE.SphereGeometry(0.07, 8, 6).scale(1, 0.35, 1.6),
+  cone: new THREE.ConeGeometry(0.045, 0.14, 8).rotateX(Math.PI).translate(0, 0.05, 0),
+  scoop: new THREE.SphereGeometry(0.055, 8, 6).translate(0, 0.14, 0),
+  bun: new THREE.CapsuleGeometry(0.035, 0.14, 3, 6).rotateX(Math.PI / 2),
+  sausage: new THREE.CapsuleGeometry(0.022, 0.18, 3, 6).rotateX(Math.PI / 2).translate(0, 0.03, 0),
+  string: new THREE.CylinderGeometry(0.004, 0.004, 1.25, 3).translate(0, 0.62, 0),
+  balloon: new THREE.SphereGeometry(0.22, 12, 10).scale(1, 1.18, 1),
+  plushBody: new THREE.SphereGeometry(0.1, 8, 6),
+  plushHead: new THREE.SphereGeometry(0.075, 8, 6).translate(0, 0.13, 0.02),
+  plushEar: new THREE.SphereGeometry(0.03, 6, 4),
 };
+
+const BALLOON_COLORS = ['#e8443a', '#4f8fdc', '#ffd23f', '#6cc28a', '#c77dff', '#ff7aa8'];
+const SCOOP_COLORS = ['#ffb3cf', '#fff3d6', '#8b5a3c', '#a6e3a1', '#ffd23f'];
+const PLUSH_COLORS = ['#9a6a42', '#d9a457', '#979aa0', '#f2dcab', '#1e2328'];
 
 const { lerp, clamp } = THREE.MathUtils;
 
@@ -57,6 +90,19 @@ export class Visitor {
   /** Walks faster, e.g. when the zoo is closing. */
   hurry = false;
   phase: Phase = 'walking';
+  /** Family: the parent this kid follows (null for parents and solo guests), and the kids following them. */
+  leader: Visitor | null = null;
+  readonly followers: Visitor[] = [];
+  /** Lifted up by a parent at a viewing deck (kids). */
+  lifted = false;
+  /** Current swing angle while on a swing (the seat follows it). */
+  swingAngle = 0;
+  /** What they're carrying, and for how long (cones and hot dogs get finished). */
+  item: Item | null = null;
+  private itemTime = 0;
+  private readonly itemProps = new THREE.Group();
+  /** The balloon floats above on its string, attached to the body rather than the swinging hand. */
+  private readonly balloonProp = new THREE.Group();
   /** Called when the guest reaches the spot for its current activity. */
   onArrive: ((v: Visitor) => void) | null = null;
 
@@ -118,9 +164,56 @@ export class Visitor {
       leaf.position.set(x, y, z);
       leaves.add(leaf);
     }
+    this.hand.add(this.itemProps);
+    this.balloonProp.position.set(0.22, 1.0, 0.12);
+    this.root.add(this.balloonProp);
     this.treats = { carrot, apple: new THREE.Mesh(propGeo.apple, propMats.apple), leaves };
     for (const p of [this.phone, this.flash, ...Object.values(this.treats)]) p.visible = false;
     this.hand.add(this.phone, ...Object.values(this.treats));
+  }
+
+  /** Start carrying an item (or nothing). */
+  carry(item: Item | null): void {
+    this.item = item;
+    this.itemTime = item === 'icecream' || item === 'hotdog' ? this.rng.float(20, 35) : Infinity;
+    this.itemProps.clear();
+    this.balloonProp.clear();
+    if (item === 'icecream') {
+      const scoop = new THREE.Mesh(
+        propGeo.scoop,
+        new THREE.MeshStandardMaterial({ color: this.rng.pick(SCOOP_COLORS), roughness: 0.6 }),
+      );
+      this.itemProps.add(new THREE.Mesh(propGeo.cone, propMats.wafer), scoop);
+    } else if (item === 'hotdog') {
+      this.itemProps.add(new THREE.Mesh(propGeo.bun, propMats.bun), new THREE.Mesh(propGeo.sausage, propMats.sausage));
+    } else if (item === 'plush') {
+      const fur = new THREE.MeshStandardMaterial({ color: this.rng.pick(PLUSH_COLORS), roughness: 0.9 });
+      const ears = [0.05, -0.05].map((x) => {
+        const ear = new THREE.Mesh(propGeo.plushEar, fur);
+        ear.position.set(x, 0.2, 0.02);
+        return ear;
+      });
+      this.itemProps.add(new THREE.Mesh(propGeo.plushBody, fur), new THREE.Mesh(propGeo.plushHead, fur), ...ears);
+    } else if (item === 'balloon') {
+      const balloon = new THREE.Mesh(
+        propGeo.balloon,
+        new THREE.MeshStandardMaterial({ color: this.rng.pick(BALLOON_COLORS), roughness: 0.35 }),
+      );
+      balloon.position.y = 1.45;
+      this.balloonProp.add(new THREE.Mesh(propGeo.string, propMats.string), balloon);
+    }
+    this.itemProps.traverse((o) => (o.castShadow = true));
+  }
+
+  /** World position of the balloon (for when it slips away). */
+  balloonWorld(out: THREE.Vector3): THREE.Vector3 {
+    return this.balloonProp.localToWorld(out.set(0, 1.45, 0));
+  }
+
+  /** The balloon's color, for the one that floats away. */
+  balloonColor(): THREE.Color | null {
+    const mesh = this.balloonProp.children[1] as THREE.Mesh | undefined;
+    return mesh ? (mesh.material as THREE.MeshStandardMaterial).color : null;
   }
 
   /** Hold out a treat for an animal at the fence. */
@@ -170,6 +263,8 @@ export class Visitor {
   start(activity: Activity): void {
     this.activity = activity;
     this.phase = 'walking';
+    this.root.position.y = 0;
+    this.lifted = false;
     this.planRoute(activity.spot);
   }
 
@@ -181,7 +276,12 @@ export class Visitor {
   update(dt: number): void {
     this.time += dt;
     if (this.phase === 'walking') this.walk(dt);
-    else if (this.phase === 'busy') this.timer -= dt;
+    else if (this.phase === 'busy') {
+      this.timer -= dt;
+      this.play();
+    }
+    this.itemTime -= dt;
+    if (this.itemTime <= 0 && this.item) this.carry(null); // finished the snack
 
     // Pop in on arrival, shrink away at the exit.
     const leaving = this.phase === 'leaving';
@@ -193,6 +293,54 @@ export class Visitor {
     this.startleTime = Math.max(0, this.startleTime - dt);
     this.updateGesture(dt);
     this.animate(dt);
+  }
+
+  /** Swings, slide and sandbox: positions driven by how long they've been at it. */
+  private play(): void {
+    const a = this.activity;
+    if (!a) return;
+    if (a.kind === 'swing') {
+      const s = PLAYGROUND.swings[a.seat];
+      this.swingAngle = 0.55 * Math.sin(this.time * 2.2 + a.seat * 1.3);
+      const seatY = SWING_PIVOT_Y - SWING_ROPE * Math.cos(this.swingAngle) + 0.03;
+      this.root.position.set(s.x, seatY - 0.52, s.z + SWING_ROPE * Math.sin(this.swingAngle) + 0.12);
+      this.yaw = 0;
+    } else if (a.kind === 'slide') {
+      this.slideAt(this.time % SLIDE_LOOP);
+    }
+  }
+
+  /** Slide loop: climb the ladder, sit at the top, whoosh down, walk round to the ladder. */
+  private slideAt(t: number): void {
+    const { ladder, top, bottom } = PLAYGROUND.slide;
+    const p = this.root.position;
+    this.walking = false;
+    if (t < 1.6) {
+      p.set(ladder.x, (t / 1.6) * top, ladder.z - 0.15);
+    } else if (t < 2.1) {
+      p.set(ladder.x, top + 0.05 - 0.52, ladder.z + 0.55);
+    } else if (t < 3.2) {
+      const k = (t - 2.1) / 1.1;
+      p.set(ladder.x, THREE.MathUtils.lerp(top + 0.05, 0.3, k) - 0.52, THREE.MathUtils.lerp(ladder.z + 0.55, bottom.z, k));
+    } else {
+      // Walk back round the side of the slide.
+      const pts: [number, number][] = [
+        [bottom.x, bottom.z],
+        [bottom.x + 1.3, bottom.z - 0.4],
+        [ladder.x + 1.3, ladder.z - 0.2],
+        [ladder.x, ladder.z - 0.15],
+      ];
+      const k = ((t - 3.2) / (SLIDE_LOOP - 3.2)) * (pts.length - 1);
+      const i = Math.min(pts.length - 2, Math.floor(k));
+      const f = k - i;
+      const x = THREE.MathUtils.lerp(pts[i][0], pts[i + 1][0], f);
+      const z = THREE.MathUtils.lerp(pts[i][1], pts[i + 1][1], f);
+      this.yaw = Math.atan2(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+      p.set(x, 0, z);
+      this.walking = true;
+      this.stride += 0.12;
+    }
+    if (t < 3.2) this.yaw = 0;
   }
 
   /** Walk the zoo's paths to `to` (see routeOnPaths). */
@@ -243,14 +391,23 @@ export class Visitor {
     const a = this.activity;
     if (!a) return;
     this.phase = a.kind === 'exit' ? 'leaving' : 'busy';
-    this.timer =
-      a.kind === 'view'
-        ? this.rng.float(7, 13)
-        : a.kind === 'sit' || a.kind === 'rest'
-          ? this.rng.float(10, 18)
-          : a.kind === 'feed'
-            ? 5
-            : this.rng.float(2, 5);
+    const r = (lo: number, hi: number) => this.rng.float(lo, hi);
+    const durations: Partial<Record<Activity['kind'], () => number>> = {
+      view: () => r(7, 13),
+      sit: () => r(10, 18),
+      rest: () => r(10, 18),
+      feed: () => 5,
+      // Only the front of the line gets served; everyone else waits until the line moves up.
+      queue: () => (a.kind === 'queue' && a.front ? 2.5 : Infinity),
+      shop: () => r(3, 5),
+      swing: () => r(12, 20),
+      slide: () => SLIDE_LOOP * 3,
+      dig: () => r(10, 18),
+      picnic: () => r(15, 25),
+      supervise: () => r(25, 40),
+      follow: () => Infinity,
+    };
+    this.timer = (durations[a.kind] ?? (() => r(2, 5)))();
     this.onArrive?.(this);
   }
 
@@ -281,19 +438,29 @@ export class Visitor {
   private animate(dt: number): void {
     const m = this.model;
     const k = 1 - Math.exp(-dt * 10);
-    const sitting = this.phase === 'busy' && this.activity?.kind === 'sit';
-    const tossing = this.phase === 'busy' && this.activity?.kind === 'feed';
-    // Sitting on the ground, legs out in front.
-    const resting = this.phase === 'busy' && this.activity?.kind === 'rest';
+    const kind = this.phase === 'busy' ? this.activity?.kind : undefined;
+    const slideT = kind === 'slide' ? this.time % SLIDE_LOOP : -1;
+    const climbing = slideT >= 0 && slideT < 1.6;
+    const onSlide = slideT >= 1.6 && slideT < 3.2;
+    const sitting = kind === 'sit' || kind === 'picnic' || kind === 'swing' || onSlide;
+    const tossing = kind === 'feed';
+    // Sitting on the ground, legs out in front (resting, or digging in the sandbox).
+    const resting = kind === 'rest' || kind === 'dig';
     const carrying = m.carry.children.length > 0;
+    const holdingKid = this.followers.some((f) => f.lifted);
+    const snacking = (this.item === 'icecream' || this.item === 'hotdog') && !this.gesture && !this.offering;
+    const bite = snacking && (this.time % (kind === 'picnic' ? 3 : 5)) < 1.1;
     const spot = this.activity?.spot;
-    if (this.phase === 'busy' && spot) this.yaw = lerpAngle(this.yaw, spot.yaw, k);
+    if (this.phase === 'busy' && spot && kind !== 'slide') this.yaw = lerpAngle(this.yaw, spot.yaw, k);
     this.root.rotation.y = this.yaw;
 
     const swing = this.walking ? Math.sin(this.stride) * 0.55 : 0;
     m.hips.forEach((hip, i) => {
       const s = i === 0 ? swing : -swing;
-      hip.rotation.x = lerp(hip.rotation.x, sitting || resting ? -1.5 : s, k);
+      let target = sitting || resting ? -1.5 : s;
+      if (climbing) target = -0.8 + Math.sin(this.time * 8 + i * Math.PI) * 0.6;
+      if (this.lifted) target = -0.35; // legs dangling, held up
+      hip.rotation.x = lerp(hip.rotation.x, target, k);
     });
     m.knees.forEach((knee, i) => {
       const phase = this.stride + (i === 0 ? 0 : Math.PI);
@@ -337,6 +504,12 @@ export class Visitor {
       }
       if (sitting) x = -0.35;
       if (resting) x = 0.45; // leaning back on the hands
+      if (kind === 'dig' && i === 0) x = -0.7 + Math.sin(this.time * 5) * 0.45;
+      if (bite && i === 0) [x, z] = [-2.0, -0.45]; // a lick of ice cream, a bite of hot dog
+      if (kind === 'swing') [x, z] = [-2.8, side * 0.12]; // holding the ropes
+      if (climbing) x = -2.6 + Math.sin(this.time * 8 + i * Math.PI) * 0.4;
+      if (onSlide && slideT > 2.1) x = -2.9; // arms up, wheee
+      if (holdingKid) [x, z] = [-1.7, -side * 0.1];
       sh.rotation.x = lerp(sh.rotation.x, x, k);
       sh.rotation.z = lerp(sh.rotation.z, z, k);
     });

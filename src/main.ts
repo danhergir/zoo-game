@@ -4,6 +4,7 @@ import { Animal } from './animals/Animal';
 import { SPECIES } from './animals/species';
 import { CameraRig } from './camera';
 import { DAY_SECONDS, HOUR_SECONDS, RESET_HOUR, lastReset, zooTime } from './clock';
+import { Amenities } from './amenities';
 import { Flamingos } from './flamingos';
 import { Lagoon } from './lagoon';
 import { Enclosure } from './enclosure';
@@ -14,6 +15,7 @@ import { Picker } from './picking';
 import { ReverseZoo } from './reverse';
 import { Rng, withSeededRandom } from './rng';
 import { World } from './scene';
+import { Train } from './train';
 import { Hud, type GameState } from './ui/hud';
 import { Inspector } from './ui/inspector';
 import { Crowd } from './visitors/Crowd';
@@ -82,7 +84,9 @@ animals.push(...babies);
 
 const lagoon = new Lagoon(LAGOON.x, LAGOON.z);
 const flamingos = new Flamingos(FLAMINGO_POND.x, FLAMINGO_POND.z, FLAMINGO_POND.r, FLAMINGO_POND.fence);
-world.scene.add(lagoon.group, flamingos.group);
+const amenities = withSeededRandom('tiny-zoo:amenities', () => new Amenities());
+const train = new Train();
+world.scene.add(lagoon.group, flamingos.group, amenities.group, train.group);
 
 withSeededRandom('tiny-zoo:plants', () =>
   world.decorate(
@@ -286,6 +290,8 @@ function frame(dt: number): void {
   for (const f of feeders) f.syncVisuals();
   lagoon.update(zooSeconds());
   flamingos.update(zooSeconds(), state.hour);
+  amenities.update(crowd.swingRiders(), zooSeconds());
+  train.update(zooSeconds(), state.hour);
   const selected = inspector.selected;
   if (selected) {
     ring.position.set(selected.position.x, 0.05, selected.position.z);

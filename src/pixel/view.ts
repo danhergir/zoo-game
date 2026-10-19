@@ -49,16 +49,16 @@ export interface PixelDeps {
 }
 
 /** CSS pixels per art pixel; only whole steps, so pixels stay square and crisp. */
-const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
 /**
- * Zoom levels: every whole number of *device* pixels per art pixel between MIN and MAX, so on
- * a retina screen there are half steps (1, 1.5, 2 …) and every level is still perfectly crisp.
+ * Zoom levels: every whole number of *device* pixels per art pixel, so on a retina screen there
+ * are half steps (0.5, 1, 1.5 …) and every level is still perfectly crisp.
  */
 function zoomLevels(): number[] {
   const dpr = window.devicePixelRatio || 1;
   const levels: number[] = [];
-  for (let k = Math.ceil(MIN_ZOOM * dpr); k <= Math.floor(MAX_ZOOM * dpr); k++) levels.push(k / dpr);
+  // From one device pixel per art pixel (0.5× on retina) up to MAX_ZOOM.
+  for (let k = 1; k <= Math.floor(MAX_ZOOM * dpr); k++) levels.push(k / dpr);
   return levels;
 }
 const START_ZOOM = 3;
@@ -120,9 +120,14 @@ export class PixelView {
   private readonly glow = glowSprite(26, '#ffd27a');
   private readonly shadows = new Map<number, Sprite>();
 
+  /** On-screen zoom buttons (2D view only). */
+  private readonly controls = document.createElement('div');
+  private readonly zoomLabel = document.createElement('span');
+
   constructor(container: HTMLElement, private readonly deps: PixelDeps) {
     this.canvas.className = 'pixel-view';
     container.prepend(this.canvas);
+    this.buildControls(container);
     this.ground = buildGround(deps.enclosures);
     this.props = buildProps(deps.enclosures, deps.feeders);
     this.bindInput();
@@ -139,6 +144,50 @@ export class PixelView {
 
   setVisible(on: boolean): void {
     this.canvas.style.display = on ? '' : 'none';
+    this.controls.style.display = on ? '' : 'none';
+    this.visible = on;
+  }
+
+  private visible = true;
+
+  /** Zoom in / out / fit-the-zoo buttons with the current level, plus + − 0 keys. */
+  private buildControls(container: HTMLElement): void {
+    const button = (label: string, title: string, onClick: () => void) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.title = title;
+      b.setAttribute('aria-label', title);
+      b.addEventListener('click', onClick);
+      return b;
+    };
+    const center = () => [window.innerWidth / 2, window.innerHeight / 2] as const;
+    this.controls.className = 'zoom-controls';
+    this.zoomLabel.className = 'zoom-level';
+    this.controls.append(
+      button('+', 'Zoom in (+)', () => this.stepZoom(1, ...center())),
+      this.zoomLabel,
+      button('−', 'Zoom out (−)', () => this.stepZoom(-1, ...center())),
+      button('⤢', 'Show the whole zoo (0)', () => this.fit()),
+    );
+    container.append(this.controls);
+    window.addEventListener('keydown', (e) => {
+      if (!this.visible || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === '+' || e.key === '=') this.stepZoom(1, ...center());
+      else if (e.key === '-' || e.key === '_') this.stepZoom(-1, ...center());
+      else if (e.key === '0') this.fit();
+    });
+  }
+
+  /** Zoom out to the closest level that shows the whole zoo, centred on it. */
+  private fit(): void {
+    this.deps.stopFollow();
+    // The zoo inside the train loop, roughly x -110..105, z -90..60.
+    const w = (215 * PX) / window.innerWidth;
+    const h = (150 * PX) / window.innerHeight;
+    const want = 1 / Math.max(w, h);
+    const levels = zoomLevels();
+    this.zoom = [...levels].reverse().find((z) => z <= want) ?? levels[0];
+    this.lookAt(-2, -15);
   }
 
   private resize(): void {
@@ -508,6 +557,8 @@ export class PixelView {
 
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.art, 0, 0, w, h, 0, 0, w * scale, h * scale);
+    const label = `${this.zoom}×`;
+    if (this.zoomLabel.textContent !== label) this.zoomLabel.textContent = label;
   }
 
   /** Reef lagoon life, seen from above through the water (drawn before anything standing). */

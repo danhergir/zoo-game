@@ -34,6 +34,50 @@ canvas {
   touch-action: none;
 }
 
+/* 2D view zoom buttons, on the right edge (clear of the info panel and the reverse-zoo corner). */
+.zoom-controls {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+}
+
+.zoom-controls button {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.zoom-controls button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.zoom-controls button:focus-visible {
+  outline: 2px solid var(--good);
+  outline-offset: 1px;
+}
+
+.zoom-level {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
 /* 2D pixel-art view: drawn at art resolution and scaled up in whole steps. */
 .pixel-view {
   position: absolute;

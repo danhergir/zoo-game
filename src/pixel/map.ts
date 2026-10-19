@@ -23,10 +23,10 @@ import { blob, canvas, ellipseSprite, hash2, rgb, shade, type Sprite } from './s
 
 /** Art pixels per world unit. */
 export const PX = 8;
-/** World area covered by the map (the zoo, the train loop and a margin). */
-export const MIN_X = -122;
+/** World area covered by the map: the zoo, the train loop, and forest wide enough to fill a wide screen at the farthest zoom. */
+export const MIN_X = -190;
 export const MIN_Z = -120;
-export const MAX_X = 122;
+export const MAX_X = 190;
 export const MAX_Z = 92;
 export const MAP_W = (MAX_X - MIN_X) * PX;
 export const MAP_H = (MAX_Z - MIN_Z) * PX;
@@ -121,6 +121,12 @@ export function buildGround(enclosures: Enclosure[]): Sprite {
   };
   const P: Record<string, number> = {};
   for (const [k, v] of Object.entries(C)) P[k] = pack(v);
+  // Shades used per pixel, packed once up front (this loop runs millions of times).
+  const gravelDark = pack(shade(C.gravel, 0.85));
+  const gravelLight = pack(shade(C.gravel, 1.1));
+  const sandDark = pack(shade(C.sand, 0.9));
+  const flamingoShore = pack(C.flamingoShore);
+  const flamingoWater = pack(C.flamingoWater);
   const floors = HABITATS.map((h, i) => {
     const xs = h.enclosure.points.map((p) => p[0]);
     const zs = h.enclosure.points.map((p) => p[1]);
@@ -138,8 +144,27 @@ export function buildGround(enclosures: Enclosure[]): Sprite {
   });
   const T = TRAIN_TRACK;
 
+  // Shapes as plain numbers, so the per-pixel loop below (millions of pixels) stays cheap;
+  // each row only checks the shapes that reach it.
+  const rects = PATH_RECTS.map(([cx, cz, w, d]) => ({ x0: cx - w / 2, x1: cx + w / 2, z0: cz - d / 2, z1: cz + d / 2 }));
+  const decks = DECKS.map((k) => ({ x0: k.x - k.w / 2, x1: k.x + k.w / 2, z0: k.z - k.d / 2, z1: k.z + k.d / 2 }));
+  const [sx, sz, sw, sd] = OPEN_AREAS[0];
+  const sand = { x0: sx - sw / 2, x1: sx + sw / 2, z0: sz - sd / 2, z1: sz + sd / 2 };
+  const lagoonOuter = LAGOON.r + LAGOON.walk;
+  const flamingoOuter = (FLAMINGO_POND.r + 1.2) * 1.2;
+  const cobble = (px: number, py: number, h: number) =>
+    py % 4 === 3 || (px + (Math.floor(py / 4) % 2) * 4) % 8 === 7 ? P.mortar : h < 0.04 ? P.pathLight : P.path;
+
   for (let py = 0; py < H; py++) {
     const z = MIN_Z + (py + 0.5) / PX;
+    const rowRects = rects.filter((r) => z >= r.z0 && z <= r.z1);
+    const rowDecks = decks.filter((r) => z >= r.z0 && z <= r.z1);
+    const rowFloors = floors.filter((f) => z >= f.box[2] && z <= f.box[3]);
+    const rowSand = z >= sand.z0 && z <= sand.z1;
+    const rowPlaza = Math.abs(z - PLAZA.z) <= PLAZA.r;
+    const rowLagoon = Math.abs(z - LAGOON.z) <= lagoonOuter;
+    const rowFlamingo = Math.abs(z - FLAMINGO_POND.z) <= flamingoOuter;
+    const tz = (z - T.z) / T.rz;
     for (let px = 0; px < W; px++) {
       const x = MIN_X + (px + 0.5) / PX;
       const i = py * W + px;
@@ -147,51 +172,51 @@ export function buildGround(enclosures: Enclosure[]): Sprite {
       let k = K.Grass;
       let col = h < 0.025 ? P.grassDark : h < 0.045 ? P.grassLight : P.grass;
 
-      // Train loop: gravel bed with two rails.
-      const dx = x - T.x;
-      const dz = z - T.z;
-      const q = Math.hypot(dx / T.rx, dz / T.rz);
-      const grad = Math.hypot(dx / (T.rx * T.rx), dz / (T.rz * T.rz)) / Math.max(q, 1e-6);
-      const d = (q - 1) / grad;
-      if (Math.abs(d) < 1.6) {
-        k = K.Gravel;
-        col = h < 0.08 ? pack(shade(C.gravel, 0.85)) : h < 0.14 ? pack(shade(C.gravel, 1.1)) : P.gravel;
-        if (Math.abs(Math.abs(d) - 0.7) < 0.09) {
-          k = K.Rail;
-          col = P.rail;
+      // Train loop: gravel bed with two rails (only worked out near the loop).
+      const tx = (x - T.x) / T.rx;
+      const q = Math.sqrt(tx * tx + tz * tz);
+      if (q > 0.9 && q < 1.1) {
+        const gx = tx / T.rx;
+        const gz = tz / T.rz;
+        const d = (q - 1) / (Math.sqrt(gx * gx + gz * gz) / q);
+        if (Math.abs(d) < 1.6) {
+          k = K.Gravel;
+          col = h < 0.08 ? gravelDark : h < 0.14 ? gravelLight : P.gravel;
+          if (Math.abs(Math.abs(d) - 0.7) < 0.09) {
+            k = K.Rail;
+            col = P.rail;
+          }
         }
       }
 
-      for (const [cx, cz, w, dd] of PATH_RECTS) {
-        if (Math.abs(x - cx) <= w / 2 && Math.abs(z - cz) <= dd / 2) k = K.Path;
+      for (const r of rowRects) if (x >= r.x0 && x <= r.x1) k = K.Path;
+      if (rowPlaza) {
+        const dx = x - PLAZA.x;
+        const dz = z - PLAZA.z;
+        if (dx * dx + dz * dz <= PLAZA.r * PLAZA.r) k = K.Path;
       }
-      if (Math.hypot(x - PLAZA.x, z - PLAZA.z) <= PLAZA.r) k = K.Path;
-      const [sx, sz, sw, sd] = OPEN_AREAS[0];
-      if (Math.abs(x - sx) <= sw / 2 && Math.abs(z - sz) <= sd / 2) {
+      if (rowSand && x >= sand.x0 && x <= sand.x1) {
         k = K.Sand;
-        col = h < 0.05 ? pack(shade(C.sand, 0.9)) : P.sand;
+        col = h < 0.05 ? sandDark : P.sand;
       }
-      if (k === K.Path) {
-        const row = Math.floor(py / 4);
-        const mortar = py % 4 === 3 || (px + (row % 2) * 4) % 8 === 7;
-        col = mortar ? P.mortar : h < 0.04 ? P.pathLight : P.path;
-      }
-      for (const deck of DECKS) {
-        if (Math.abs(x - deck.x) <= deck.w / 2 && Math.abs(z - deck.z) <= deck.d / 2) {
+      if (k === K.Path) col = cobble(px, py, h);
+      for (const r of rowDecks) {
+        if (x >= r.x0 && x <= r.x1) {
           k = K.Deck;
           col = py % 3 === 2 ? P.deckLine : P.deck;
         }
       }
 
-      for (const f of floors) {
-        const [x0, x1, z0, z1] = f.box;
-        if (x < x0 || x > x1 || z < z0 || z > z1 || !inPolygon(f.pts, x, z)) continue;
+      for (const f of rowFloors) {
+        if (x < f.box[0] || x > f.box[1] || !inPolygon(f.pts, x, z)) continue;
         k = f.icy ? K.Ice : K.Floor;
         col = f.icy ? (h < 0.06 ? P.iceSpeck : P.ice) : h < 0.04 ? f.dark : h < 0.06 ? f.light : f.base;
         if (f.pond) {
-          const a = Math.atan2(z - f.pond.z, x - f.pond.x);
-          const r = Math.hypot(x - f.pond.x, z - f.pond.z);
-          const wb = wobble(a, f.seed);
+          const dx = x - f.pond.x;
+          const dz = z - f.pond.z;
+          const r = Math.sqrt(dx * dx + dz * dz);
+          if (r > (f.pond.r + 1.1) * 1.2) continue;
+          const wb = wobble(Math.atan2(dz, dx), f.seed);
           if (r <= (f.pond.r + 1.1) * wb) {
             k = f.icy ? K.IceShore : K.Shore;
             col = f.icy ? P.iceShore : P.shore;
@@ -205,32 +230,41 @@ export function buildGround(enclosures: Enclosure[]): Sprite {
       }
 
       // Reef lagoon: walkway ring, glass rim, water.
-      const lr = Math.hypot(x - LAGOON.x, z - LAGOON.z);
-      if (lr <= LAGOON.r + LAGOON.walk) {
-        k = K.Path;
-        const row = Math.floor(py / 4);
-        col = py % 4 === 3 || (px + (row % 2) * 4) % 8 === 7 ? P.mortar : P.path;
-      }
-      if (lr <= LAGOON.r + 0.3) {
-        k = K.Glass;
-        col = P.glass;
-      }
-      if (lr <= LAGOON.r) {
-        k = K.Lagoon;
-        const ripple = py % 3 === 0 && hash2(Math.floor(px / 7), py, 5) < 0.25 && px % 7 < 3;
-        col = ripple ? P.lagoonLight : P.lagoon;
+      if (rowLagoon) {
+        const dx = x - LAGOON.x;
+        const dz = z - LAGOON.z;
+        const lr = Math.sqrt(dx * dx + dz * dz);
+        if (lr <= lagoonOuter) {
+          k = K.Path;
+          col = cobble(px, py, 1);
+        }
+        if (lr <= LAGOON.r + 0.3) {
+          k = K.Glass;
+          col = P.glass;
+        }
+        if (lr <= LAGOON.r) {
+          k = K.Lagoon;
+          const ripple = py % 3 === 0 && hash2(Math.floor(px / 7), py, 5) < 0.25 && px % 7 < 3;
+          col = ripple ? P.lagoonLight : P.lagoon;
+        }
       }
 
       // Flamingo pond.
-      const fr = Math.hypot(x - FLAMINGO_POND.x, z - FLAMINGO_POND.z);
-      const fa = Math.atan2(z - FLAMINGO_POND.z, x - FLAMINGO_POND.x);
-      if (fr <= (FLAMINGO_POND.r + 1.2) * wobble(fa, 9)) {
-        k = K.Shore;
-        col = pack(C.flamingoShore);
-      }
-      if (fr <= FLAMINGO_POND.r * wobble(fa, 9)) {
-        k = K.Water;
-        col = pack(C.flamingoWater);
+      if (rowFlamingo) {
+        const dx = x - FLAMINGO_POND.x;
+        const dz = z - FLAMINGO_POND.z;
+        const fr = Math.sqrt(dx * dx + dz * dz);
+        if (fr <= flamingoOuter) {
+          const wb = wobble(Math.atan2(dz, dx), 9);
+          if (fr <= (FLAMINGO_POND.r + 1.2) * wb) {
+            k = K.Shore;
+            col = flamingoShore;
+          }
+          if (fr <= FLAMINGO_POND.r * wb) {
+            k = K.Water;
+            col = flamingoWater;
+          }
+        }
       }
 
       kind[i] = k;
@@ -243,10 +277,15 @@ export function buildGround(enclosures: Enclosure[]): Sprite {
     for (let px = 1; px < W - 1; px++) {
       const i = py * W + px;
       const k = kind[i];
-      const n = [kind[i - 1], kind[i + 1], kind[i - W], kind[i + W]];
-      if (k === K.Path && n.some((v) => v === K.Grass || v === K.Floor || v === K.Ice)) color[i] = P.curb;
-      if ((k === K.Shore || k === K.IceShore) && n.some((v) => v === K.Water || v === K.Deep)) color[i] = k === K.Shore ? P.bank : P.iceSpeck;
-      if (k === K.Deck && n.some((v) => v !== K.Deck)) color[i] = P.deckLine;
+      if (k !== K.Path && k !== K.Shore && k !== K.IceShore && k !== K.Deck) continue;
+      const a = kind[i - 1];
+      const b = kind[i + 1];
+      const c = kind[i - W];
+      const d = kind[i + W];
+      const any = (v: number) => a === v || b === v || c === v || d === v;
+      if (k === K.Path && (any(K.Grass) || any(K.Floor) || any(K.Ice))) color[i] = P.curb;
+      else if ((k === K.Shore || k === K.IceShore) && (any(K.Water) || any(K.Deep))) color[i] = k === K.Shore ? P.bank : P.iceSpeck;
+      else if (k === K.Deck && (a !== K.Deck || b !== K.Deck || c !== K.Deck || d !== K.Deck)) color[i] = P.deckLine;
     }
   }
 

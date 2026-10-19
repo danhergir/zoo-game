@@ -774,7 +774,7 @@ export class PixelView {
       deps.toast(moment.message, {
         label: 'Watch',
         onClick: () => {
-          this.flyTo(moment.x, moment.z, 4);
+          this.flyTo(moment.x, moment.z, 2);
           if (moment.follow) deps.follow(moment.follow);
         },
       });

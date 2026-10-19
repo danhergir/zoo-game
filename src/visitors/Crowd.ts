@@ -448,6 +448,14 @@ export class Crowd {
     }
   }
 
+  /** Balloons drifting away (position and colour), for the 2D view. */
+  get lostBalloons(): { x: number; y: number; z: number; color: string }[] {
+    return this.lost.map((b) => ({
+      ...b.mesh.position,
+      color: '#' + (b.mesh.material as THREE.MeshStandardMaterial).color.getHexString(),
+    }));
+  }
+
   /** Every so often a balloon slips out of someone's hand and floats away. */
   private updateBalloons(dt: number): void {
     for (const v of this.visitors) {

@@ -126,6 +126,17 @@ export class Train {
     return this.cars.map((c) => ({ x: c.position.x, z: c.position.z, yaw: c.rotation.y }));
   }
 
+  /** Chimney smoke puffs (position and size) while the train runs, for the 2D view. */
+  get smokePuffs(): { x: number; y: number; z: number; size: number }[] {
+    if (!this.smoke.visible) return [];
+    const m = new THREE.Matrix4();
+    return Array.from({ length: this.smoke.count }, (_, i) => {
+      this.smoke.getMatrixAt(i, m);
+      const e = m.elements;
+      return { x: e[12], y: e[13], z: e[14], size: e[0] };
+    });
+  }
+
   /** Place the train for zoo time `t` (seconds) and zoo hour `hour`. */
   update(t: number, hour: number): void {
     const running = hour >= OPEN && hour < CLOSE;

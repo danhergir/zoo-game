@@ -141,6 +141,36 @@ export class Ambient {
     this.group.add(this.butterflies);
   }
 
+  /**
+   * What's in the sky as of the last update(), for the 2D view: birds and gulls (height, wing
+   * flap 0..1), butterflies (with colour) and clouds. Read straight from the instances.
+   */
+  get sky(): {
+    birds: { x: number; z: number; y: number; flap: number }[];
+    gulls: { x: number; z: number; y: number; flap: number }[];
+    butterflies: { x: number; z: number; y: number; flap: number; color: string }[];
+    clouds: { x: number; z: number; seed: number }[];
+  } {
+    const read = (mesh: THREE.InstancedMesh, flapOf: (e: number[]) => number) => {
+      if (!mesh.visible) return [];
+      return Array.from({ length: mesh.count }, (_, i) => {
+        mesh.getMatrixAt(i, this.m);
+        const e = this.m.elements;
+        return { x: e[12], z: e[14], y: e[13], flap: flapOf(e) };
+      });
+    };
+    const c = new THREE.Color();
+    return {
+      birds: read(this.birds, (e) => Math.min(1, (e[5] - 0.35) / 0.9)),
+      gulls: read(this.gulls, (e) => Math.min(1, (e[5] - 0.5) / 0.6)),
+      butterflies: read(this.butterflies, (e) => Math.min(1, (Math.hypot(e[0], e[2]) - 0.15) / 0.85)).map((b, i) => {
+        this.butterflies.getColorAt(i, c);
+        return { ...b, color: '#' + c.getHexString(THREE.SRGBColorSpace) };
+      }),
+      clouds: this.clouds.flatMap((cl, i) => (cl.visible ? [{ x: cl.position.x, z: cl.position.z, seed: i }] : [])),
+    };
+  }
+
   /** Zoo time `t` (seconds), zoo hour, the day's weather, and where the camera is looking (rain follows it). */
   update(t: number, hour: number, w: WeatherState, focus: THREE.Vector3): void {
     const day = hour > 6.5 && hour < 19.5;

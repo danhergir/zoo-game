@@ -30,7 +30,7 @@ const SWING_ROPE = 1.67;
 const SLIDE_LOOP = 6;
 
 type Phase = 'walking' | 'busy' | 'leaving' | 'done';
-type Gesture = 'photo' | 'point' | 'wave';
+export type Gesture = 'photo' | 'point' | 'wave';
 export type Treat = 'carrot' | 'apple' | 'leaves';
 
 // Small props shared by everyone, attached to the right hand when needed.
@@ -229,14 +229,32 @@ export class Visitor {
 
   /** World position of the balloon (for when it slips away). */
   balloonWorld(out: THREE.Vector3): THREE.Vector3 {
+    // World matrices are only refreshed by the 3D render; the 2D view doesn't run it.
+    this.balloonProp.updateWorldMatrix(true, false);
     return this.balloonProp.localToWorld(out.set(0, 1.45, 0));
   }
 
-  /** The balloon's color, for the one that floats away. */
   /** Outfit colours (for the 2D view). */
   get look(): PersonLook {
     return this.model.look;
   }
+
+  /** The gesture they're making right now, if any (for the 2D view). */
+  get gestureNow(): Gesture | null {
+    return this.gesture;
+  }
+
+  /** The camera flash is firing this frame (for the 2D view). */
+  get flashing(): boolean {
+    return this.flash.visible;
+  }
+
+  /** Jumped at a roar a moment ago (for the 2D view). */
+  get startled(): boolean {
+    return this.startleTime > 0;
+  }
+
+  /** The balloon's color, for the one that floats away. */
 
   balloonColor(): THREE.Color | null {
     const mesh = this.balloonProp.children[1] as THREE.Mesh | undefined;

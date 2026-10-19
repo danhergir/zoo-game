@@ -48,6 +48,8 @@ export interface Prop {
   when?: 'night' | 'day';
   /** Flat on the ground (shadows): drawn before everything standing. */
   layer?: 'shadow';
+  /** Never overlaps anything that moves (the forest past the train loop): painted into the ground once. */
+  bake?: boolean;
 }
 
 const enum K {
@@ -838,11 +840,19 @@ function decor(enclosures: Enclosure[]): Prop[] {
       if (!sprite) continue;
       const ax = toArtX(x);
       const ay = toArtY(z);
-      if (shadow) props.push({ sprite: shadow, x: ax + 2, y: ay, ax: shadow.width / 2, ay: shadow.height / 2, layer: 'shadow' });
-      props.push({ sprite, x: ax, y: ay, ax: Math.floor(sprite.width / 2), ay: flat ? sprite.height / 2 : sprite.height - 1, layer: flat ? 'shadow' : undefined });
+      const bake = outside > 3.5;
+      if (shadow) props.push({ sprite: shadow, x: ax + 2, y: ay, ax: shadow.width / 2, ay: shadow.height / 2, layer: 'shadow', bake });
+      props.push({ sprite, x: ax, y: ay, ax: Math.floor(sprite.width / 2), ay: flat ? sprite.height / 2 : sprite.height - 1, layer: flat ? 'shadow' : undefined, bake });
     }
   }
   return props;
+}
+
+/** Paints props that never overlap anything moving into the ground layer (shadows first, then back to front). */
+export function bakeProps(ground: Sprite, props: Prop[]): void {
+  const ctx = ground.getContext('2d')!;
+  const baked = props.filter((p) => p.bake).sort((a, b) => (a.layer === b.layer ? a.y - b.y : a.layer === 'shadow' ? -1 : 1));
+  for (const p of baked) ctx.drawImage(p.sprite, Math.round(p.x - p.ax), Math.round(p.y - p.ay));
 }
 
 /** Every static standing thing on the map. */

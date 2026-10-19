@@ -290,6 +290,11 @@ export class Animal {
   }
 
   /** In the water right now (penguins swimming). */
+  /** Mid-roar (lions at the fence; for the 2D view). */
+  get roaring(): boolean {
+    return this.roarTime > 0;
+  }
+
   get swimming(): boolean {
     return this.swims && this.enclosure.inWater(this.root.position.x, this.root.position.z);
   }

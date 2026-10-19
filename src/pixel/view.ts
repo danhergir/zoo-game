@@ -1,4 +1,5 @@
 import type * as THREE from 'three';
+import type { Ambient } from '../ambient';
 import type { Animal } from '../animals/Animal';
 import type { Enclosure } from '../enclosure';
 import type { Feeder } from '../feeder';
@@ -24,8 +25,8 @@ import {
   type Directions,
   type Rows,
 } from './art';
-import { bubble, withProps, type Bubble } from './extras';
-import { MAP_H, MAP_W, PX, buildGround, buildProps, toArtX, toArtY, type Prop } from './map';
+import { bodyEdge, bubble, butterfly, cloudShadow, feedLoad, flyer, puff, withGesture, withProps, type Bubble } from './extras';
+import { MAP_H, MAP_W, PX, bakeProps, buildGround, buildProps, toArtX, toArtY, type Prop } from './map';
 import { SPECIES_ART } from './species';
 import { cached, canvas, compile, ellipseSprite, glowSprite, hash2, shade, type Sprite } from './sprite';
 
@@ -39,6 +40,7 @@ export interface PixelDeps {
   lagoon: Lagoon;
   train: Train;
   reverse: ReverseZoo;
+  ambient: Ambient;
   state: GameState;
   weather: WeatherState;
   /** The 3D rig's follow target, shared so the info panel's Follow button works in both views. */
@@ -81,6 +83,8 @@ interface Drawn {
   animal?: Animal;
   /** Speech bubble shown above an animal (asleep, hungry, unhappy). */
   icon?: Bubble;
+  /** Effect drawn with the animal: an elephant's water spray or a lion's roar. */
+  effect?: { kind: 'spray' | 'roar'; facing: number };
 }
 
 const smoothstep = (a: number, b: number, x: number) => {
@@ -129,7 +133,10 @@ export class PixelView {
     container.prepend(this.canvas);
     this.buildControls(container);
     this.ground = buildGround(deps.enclosures);
-    this.props = buildProps(deps.enclosures, deps.feeders);
+    const props = buildProps(deps.enclosures, deps.feeders);
+    // The forest past the train loop never overlaps anything moving: paint it into the ground once.
+    bakeProps(this.ground, props);
+    this.props = props.filter((p) => !p.bake);
     this.bindInput();
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -332,6 +339,7 @@ export class PixelView {
       shadow: used === 'swim' || a.offGround ? 0 : Math.round(sprite.width * 0.42),
       animal: a,
       icon: a.state === 'sleep' ? 'sleep' : a.hunger < 0.2 && a.state !== 'eat' ? a.feeder.food : a.happiness < 0.3 ? 'unhappy' : undefined,
+      effect: a.state === 'spray' && !baby ? { kind: 'spray', facing: flip ? -1 : 1 } : a.roaring ? { kind: 'roar', facing: f.dir === 'side' ? (flip ? -1 : 1) : 0 } : undefined,
     };
   }
 
@@ -377,18 +385,35 @@ export class PixelView {
     const outfit = this.outfit(v);
     const item = v.keeper ? null : v.item;
     const umbrella = v.umbrella && !v.keeper && !sitting;
-    const key = `person:${Object.values(outfit).join('')}:${v.child}:${f.dir}:${pose}:${f.flip}:${item}:${umbrella}`;
-    let top = 0;
+    const gesture = v.keeper || sitting ? null : v.gestureNow;
+    const flashing = gesture === 'photo' && v.flashing;
+    const wave = gesture === 'wave' ? Math.floor(performance.now() / 220) % 2 : 0;
+    // Keepers on a feeding run carry the food.
+    const feed = v.keeper && v.activity?.kind === 'feed' ? v.activity.feeder.food : null;
+    const key = `person:${Object.values(outfit).join('')}:${v.child}:${f.dir}:${pose}:${f.flip}:${item}:${umbrella}:${gesture}:${flashing}:${wave}:${feed}`;
     const sprite = cached(key, () => {
       const rows = pose === 'sit' ? PERSON_SIT[f.dir] : PERSON[f.dir][pose] ?? PERSON[f.dir].stand;
       // Children: shorter body (and legs, unless they're folded up sitting).
       const kid = v.child ? (pose === 'sit' ? rows.filter((_, i) => i !== 9) : childRows(rows)) : rows;
-      const base = compile(kid, outfit, f.flip);
-      if (!item && !umbrella) return base;
-      return withProps(base, item, umbrella, item === 'balloon' ? outfit.balloon : outfit.T, f.dir === 'side', f.flip).sprite;
+      let s = compile(kid, outfit, f.flip);
+      if (item || umbrella) s = withProps(s, item, umbrella, item === 'balloon' ? outfit.balloon : outfit.T, f.dir === 'side', f.flip).sprite;
+      if (gesture) s = withGesture(s, gesture, flashing, f.dir === 'side', f.flip, wave);
+      if (feed) {
+        const load = feedLoad(feed);
+        const c = canvas(s.width + 2, s.height);
+        const g = c.getContext('2d')!;
+        g.drawImage(s, 1, 0);
+        // Held in front: at the leading hand from the side, at the chest from front/back.
+        const edge = 1 + bodyEdge(s, s.height - 9, f.flip ? -1 : 1);
+        const hx = f.dir === 'side' ? (f.flip ? edge - load.width + 1 : edge) : Math.floor(c.width / 2 - load.width / 2);
+        if (f.dir !== 'back') g.drawImage(load, hx, s.height - 9);
+        s = c;
+      }
+      return s;
     });
-    top = sprite.height;
-    return { sprite, x: toArtX(p.x), y: toArtY(p.z) - p.y * PX, ax: Math.floor(sprite.width / 2), ay: top - 1, shadow: sitting ? 0 : 4 };
+    // A little hop when a lion roars nearby.
+    const hop = v.startled ? 2 : 0;
+    return { sprite, x: toArtX(p.x), y: toArtY(p.z) - p.y * PX, ax: Math.floor(sprite.width / 2), ay: sprite.height - 1 + hop, shadow: sitting ? 0 : 4 };
   }
 
   /** The reverse zoo: animals touring the paths, people in the enclosures and in the water. */
@@ -486,6 +511,7 @@ export class PixelView {
     actx.fillRect(0, 0, w, h);
     actx.drawImage(this.ground, left, top, w, h, 0, 0, w, h);
     this.underwater(left, top, w, h);
+    this.cloudShadows(left, top, w, h);
 
     // Everything standing, sorted back to front.
     const drawn: Drawn[] = [];
@@ -513,6 +539,7 @@ export class PixelView {
     }
     this.flamingos(drawn);
     this.train(drawn);
+    this.butterflies(drawn);
     drawn.sort((a, b) => a.y - b.y);
     // Shadows first, so nothing standing gets darkened by a neighbour's shadow.
     for (const p of flat) actx.drawImage(p.sprite, Math.round(p.x - p.ax - left), Math.round(p.y - p.ay - top));
@@ -533,7 +560,9 @@ export class PixelView {
         if (d.animal === selected) marker = { x: x + Math.floor(d.sprite.width / 2), y: y - 3 };
       }
       if (d.icon) icons.push({ x: x + Math.floor(d.sprite.width / 2) + 3, y: y - 9, icon: d.icon });
+      if (d.effect) this.effect(d.effect, x, y, d.sprite.width);
     }
+    this.overhead(left, top, w, h);
 
     this.light(night, left, top, w, h);
     this.rain(w, h);
@@ -559,6 +588,101 @@ export class PixelView {
     ctx.drawImage(this.art, 0, 0, w, h, 0, 0, w * scale, h * scale);
     const label = `${this.zoom}×`;
     if (this.zoomLabel.textContent !== label) this.zoomLabel.textContent = label;
+  }
+
+  private readonly cloudSprites = [0, 1, 2, 3].map((i) => cloudShadow(i, PX));
+
+  /** Cloud shadows drifting over the ground (faint, under everything standing). */
+  private cloudShadows(left: number, top: number, w: number, h: number): void {
+    const { actx } = this;
+    actx.globalAlpha = 0.14;
+    for (const c of this.deps.ambient.sky.clouds) {
+      const s = this.cloudSprites[c.seed % this.cloudSprites.length];
+      const x = Math.round(toArtX(c.x) - left - s.width / 2);
+      const y = Math.round(toArtY(c.z) - top - s.height / 2);
+      if (x > w || y > h || x + s.width < 0 || y + s.height < 0) continue;
+      actx.drawImage(s, x, y);
+    }
+    actx.globalAlpha = 1;
+  }
+
+  /** Butterflies flutter low among everything else (a fixed-size sprite, so they don't flicker). */
+  private butterflies(out: Drawn[]): void {
+    for (const b of this.deps.ambient.sky.butterflies) {
+      const open = b.flap > 0.5;
+      const sprite = cached(`butterfly:${b.color}:${open}`, () => butterfly(open, b.color));
+      out.push({ sprite, x: toArtX(b.x), y: toArtY(b.z), ax: 1, ay: 1 + Math.round(b.y * PX) });
+    }
+  }
+
+  /** Things above the scene: birds and gulls, train smoke, balloons drifting away. */
+  private overhead(left: number, top: number, w: number, h: number): void {
+    const { actx, deps } = this;
+    const sky = deps.ambient.sky;
+    const visible = (x: number, y: number) => x > -20 && y > -20 && x < w + 20 && y < h + 20;
+    for (const [list, gull] of [[sky.birds, false], [sky.gulls, true]] as const) {
+      for (const b of list) {
+        // High fliers are drawn a little above where they are, as in the 3/4 view.
+        const x = Math.round(toArtX(b.x) - left - 2);
+        const y = Math.round(toArtY(b.z) - b.y * PX * 0.3 - top);
+        if (!visible(x, y)) continue;
+        const up = b.flap > 0.5;
+        actx.drawImage(cached(`flyer:${up}:${gull}`, () => flyer(up, gull)), x, y);
+      }
+    }
+    for (const p of deps.train.smokePuffs) {
+      const r = Math.max(2, Math.round(p.size * 2.2));
+      const s = cached(`puff:${r}`, () => puff(r));
+      const x = Math.round(toArtX(p.x) - left - r);
+      const y = Math.round(toArtY(p.z) - p.y * PX - top - r);
+      if (!visible(x, y)) continue;
+      actx.globalAlpha = Math.max(0.15, 1 - (p.size - 0.5) / 1.8);
+      actx.drawImage(s, x, y);
+    }
+    actx.globalAlpha = 1;
+    for (const b of deps.crowd.lostBalloons) {
+      const x = Math.round(toArtX(b.x) - left);
+      const y = Math.round(toArtY(b.z) - b.y * PX - top);
+      if (!visible(x, y)) continue;
+      actx.fillStyle = '#e8e4dc';
+      actx.fillRect(x, y + 4, 1, 4);
+      actx.fillStyle = '#2a2018';
+      actx.fillRect(x - 2, y - 1, 5, 6);
+      actx.fillStyle = b.color;
+      actx.fillRect(x - 1, y, 3, 4);
+      actx.fillStyle = shade(b.color, 1.4);
+      actx.fillRect(x - 1, y, 1, 1);
+    }
+  }
+
+  /** An elephant's spray (an arc of droplets over its back) or a lion's roar (sound lines). */
+  private effect(e: { kind: 'spray' | 'roar'; facing: number }, x: number, y: number, width: number): void {
+    const { actx } = this;
+    const t = performance.now() / 1000;
+    if (e.kind === 'spray') {
+      // From the trunk at the front, up and back over the body.
+      const fx = e.facing > 0 ? x + width - 3 : x + 2;
+      for (let k = 0; k < 10; k++) {
+        const u = (t * 1.3 + k / 10) % 1;
+        const dx = -e.facing * u * width * 0.9;
+        const dy = -Math.sin(u * Math.PI) * 14;
+        actx.fillStyle = k % 2 ? '#e4f4ff' : '#7cc8e8';
+        actx.fillRect(Math.round(fx + dx), Math.round(y + 6 + dy), 1, 2);
+      }
+      return;
+    }
+    // Roar: nested arcs beside the head (in front of the mouth from the side), pulsing outwards.
+    const pulse = Math.floor(t * 8) % 2;
+    const arc = (cx: number, cy: number, dir: number) => {
+      actx.fillRect(cx, cy - 2, 1, 1);
+      actx.fillRect(cx + dir, cy - 1, 1, 3);
+      actx.fillRect(cx, cy + 2, 1, 1);
+    };
+    actx.fillStyle = '#fbf8f0';
+    for (const r of [2 + pulse, 5 + pulse]) {
+      if (e.facing >= 0) arc(x + width + r - 2, y + 6, 1);
+      if (e.facing <= 0) arc(x - r + 1, y + 6, -1);
+    }
   }
 
   /** Reef lagoon life, seen from above through the water (drawn before anything standing). */

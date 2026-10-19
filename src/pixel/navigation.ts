@@ -77,6 +77,8 @@ export class MapLabels {
 
 /** Area the minimap covers: the train loop and a little margin. */
 const MINI = { x0: TRAIN_TRACK.x - TRAIN_TRACK.rx - 4, x1: TRAIN_TRACK.x + TRAIN_TRACK.rx + 4, z0: TRAIN_TRACK.z - TRAIN_TRACK.rz - 4, z1: TRAIN_TRACK.z + TRAIN_TRACK.rz + 4 };
+const MINI_W = 196;
+const MINI_H = Math.round((MINI_W * (MINI.z1 - MINI.z0)) / (MINI.x1 - MINI.x0));
 const DOT: Record<SpeciesId, string> = { zebra: '#ffffff', elephant: '#b8bbc0', lion: '#f0b040', giraffe: '#e8c070', penguin: '#2a2e36', monkey: '#9a6a3e' };
 
 /** A small overview in a corner: the zoo, animals as dots, and the current view as a rectangle. Click or drag to move. */
@@ -86,23 +88,18 @@ export class Minimap {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly base = document.createElement('canvas');
   private frame = 0;
+  private dpr = 0;
 
-  constructor(container: HTMLElement, ground: Sprite, onMove: (x: number, z: number, glide: boolean) => void) {
+  constructor(
+    container: HTMLElement,
+    private readonly ground: Sprite,
+    onMove: (x: number, z: number, glide: boolean) => void,
+  ) {
     this.root.className = 'minimap';
-    const w = 196;
-    const h = Math.round((w * (MINI.z1 - MINI.z0)) / (MINI.x1 - MINI.x0));
-    const dpr = window.devicePixelRatio || 1;
-    for (const c of [this.canvas, this.base]) {
-      c.width = Math.round(w * dpr);
-      c.height = Math.round(h * dpr);
-    }
-    this.canvas.style.width = `${w}px`;
-    this.canvas.style.height = `${h}px`;
+    this.canvas.style.width = `${MINI_W}px`;
+    this.canvas.style.height = `${MINI_H}px`;
     this.ctx = this.canvas.getContext('2d')!;
-    // The map, shrunk once (smoothing on: this is an overview, not pixel art).
-    const b = this.base.getContext('2d')!;
-    b.imageSmoothingQuality = 'high';
-    b.drawImage(ground, toArtX(MINI.x0), toArtY(MINI.z0), (MINI.x1 - MINI.x0) * PX, (MINI.z1 - MINI.z0) * PX, 0, 0, this.base.width, this.base.height);
+    this.resize();
     this.root.append(this.canvas);
     container.append(this.root);
 
@@ -117,7 +114,23 @@ export class Minimap {
       onMove(...toWorld(e), true);
     });
     this.canvas.addEventListener('pointermove', (e) => dragging && onMove(...toWorld(e), false));
-    this.canvas.addEventListener('pointerup', () => (dragging = false));
+    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) this.canvas.addEventListener(type, () => (dragging = false));
+  }
+
+  /** Sharp at the screen's pixel ratio: re-shrinks the map when that changes. */
+  resize(): void {
+    const dpr = window.devicePixelRatio || 1;
+    if (dpr === this.dpr) return;
+    this.dpr = dpr;
+    for (const c of [this.canvas, this.base]) {
+      c.width = Math.round(MINI_W * dpr);
+      c.height = Math.round(MINI_H * dpr);
+    }
+    // The map, shrunk once (smoothing on: this is an overview, not pixel art).
+    const b = this.base.getContext('2d')!;
+    b.imageSmoothingQuality = 'high';
+    b.drawImage(this.ground, toArtX(MINI.x0), toArtY(MINI.z0), (MINI.x1 - MINI.x0) * PX, (MINI.z1 - MINI.z0) * PX, 0, 0, this.base.width, this.base.height);
+    this.frame = 0;
   }
 
   /** Redrawn every few frames: dots don't need 60 fps. */
@@ -141,9 +154,8 @@ export class Minimap {
     // The current view.
     const halfW = window.innerWidth / 2 / cam.scale;
     const halfH = window.innerHeight / 2 / cam.scale;
-    const dpr = window.devicePixelRatio || 1;
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = Math.max(1, Math.round(dpr * 1.5));
+    ctx.lineWidth = Math.max(1, Math.round(this.dpr * 1.5));
     ctx.strokeRect(px(cam.x - halfW), pz(cam.z - halfH), halfW * 2 * sx, halfH * 2 * sz);
   }
 }
@@ -196,12 +208,14 @@ export class Highlights {
   constructor(
     private readonly animals: Animal[],
     private readonly enclosures: Enclosure[],
-    private readonly crowd: Crowd,
     private readonly train: Train,
   ) {}
 
-  /** The newest highlight this frame, if one is due. `now` in ms. */
-  check(now: number): Highlight | null {
+  /**
+   * The newest highlight this frame, if one is due. `now` in ms; whether the train is puffing
+   * smoke and the balloons drifting off are passed in, as the view already read them this frame.
+   */
+  check(now: number, smoking: boolean, lost: Crowd['lostBalloons']): Highlight | null {
     const found: { kind: string; h: Highlight }[] = [];
     const feeding = new Set(this.enclosures.filter((e) => e.feedingNow).map((e) => e.name));
     for (const name of feeding) {
@@ -220,11 +234,11 @@ export class Highlights {
       if (!this.spraying.has(a)) found.push({ kind: 'spray', h: { message: `🐘 ${a.name} is taking a shower`, x: a.position.x, z: a.position.z, follow: a.root } });
     }
     this.spraying = spraying;
-    const engine = this.train.carPoses[0];
-    const running = this.train.smokePuffs.length > 0;
-    if (running && !this.trainRunning) found.push({ kind: 'train', h: { message: '🚂 The zoo train is leaving the station', x: engine.x, z: engine.z } });
-    this.trainRunning = running;
-    const lost = this.crowd.lostBalloons;
+    if (smoking && !this.trainRunning) {
+      const engine = this.train.carPoses[0];
+      found.push({ kind: 'train', h: { message: '🚂 The zoo train is leaving the station', x: engine.x, z: engine.z } });
+    }
+    this.trainRunning = smoking;
     if (lost.length > this.balloons) {
       const b = lost[lost.length - 1];
       found.push({ kind: 'balloon', h: { message: '🎈 A balloon got away!', x: b.x, z: b.z } });

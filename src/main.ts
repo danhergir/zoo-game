@@ -341,6 +341,8 @@ function watchFrameRate(realDt: number): void {
 }
 
 window.addEventListener('keydown', (e) => {
+  // Not Cmd/Ctrl+P (print), and holding a key down toggles once.
+  if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.code === 'KeyP') {
     pixelMode = !pixelMode;
     try {

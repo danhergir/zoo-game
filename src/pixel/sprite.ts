@@ -50,7 +50,7 @@ export function compile(rows: Rows, palette: Record<string, string>, flip = fals
 }
 
 const cache = new Map<string, Sprite>();
-/** compile() with a cache keyed by the caller's key. */
+/** compile() with a cache keyed by the caller's key. For a fixed set of keys (species, props). */
 export function cached(key: string, make: () => Sprite): Sprite {
   let s = cache.get(key);
   if (!s) {
@@ -58,6 +58,33 @@ export function cached(key: string, make: () => Sprite): Sprite {
     cache.set(key, s);
   }
   return s;
+}
+
+/**
+ * cached() for keys that keep coming (each visitor's outfit): keeps the most recently used
+ * sprites and drops the rest. Thousands of idle canvases make every drawImage slower.
+ */
+export class SpriteCache {
+  private readonly map = new Map<string, Sprite>();
+
+  constructor(private readonly limit: number) {}
+
+  get(key: string, make: () => Sprite): Sprite {
+    let s = this.map.get(key);
+    if (s) {
+      // Move to the back: Map iterates in insertion order, so the front is the least recent.
+      this.map.delete(key);
+    } else {
+      s = make();
+      if (this.map.size >= this.limit) this.map.delete(this.map.keys().next().value!);
+    }
+    this.map.set(key, s);
+    return s;
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
 }
 
 /** Deterministic hash of two integers to [0, 1): static texture detail without randomness. */

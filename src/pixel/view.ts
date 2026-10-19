@@ -29,7 +29,7 @@ import { bodyEdge, bubble, butterfly, cloudShadow, feedLoad, flyer, puff, withGe
 import { MAP_H, MAP_W, MIN_X, MIN_Z, PX, bakeProps, buildGround, buildProps, toArtX, toArtY, type Prop } from './map';
 import { Highlights, MapLabels, Minimap, QuickJump, type Camera, type Place } from './navigation';
 import { SPECIES_ART } from './species';
-import { cached, canvas, compile, ellipseSprite, glowSprite, hash2, shade, type Sprite } from './sprite';
+import { SpriteCache, cached, canvas, compile, ellipseSprite, glowSprite, hash2, shade, type Sprite } from './sprite';
 
 export interface PixelDeps {
   animals: Animal[];
@@ -80,6 +80,10 @@ const START = { x: -14, z: 0 };
 const SITTING = new Set(['sit', 'picnic', 'swing', 'rest', 'dig']);
 const BALLOONS = ['#e8453a', '#3d7fd0', '#f0c03a', '#4aa05a', '#c77dff', '#ff7aa8'];
 const CARRIAGES = ['#2f6f8f', '#6cc28a', '#ffd23f'];
+/** Person sprites kept around: comfortably more than a full zoo's worth on screen at once. */
+const PEOPLE_CACHE = 800;
+
+type Sky = Ambient['sky'];
 
 interface Drawn {
   sprite: Sprite;
@@ -131,6 +135,8 @@ export class PixelView {
   private view = { left: 0, top: 0, w: 1, h: 1 };
   private readonly glow = glowSprite(26, '#ffd27a');
   private readonly shadows = new Map<number, Sprite>();
+  /** Visitors keep arriving in new outfits, so their sprites live in a bounded cache. */
+  private readonly people = new SpriteCache(PEOPLE_CACHE);
 
   /** On-screen zoom buttons (2D view only). */
   private readonly controls = document.createElement('div');
@@ -159,10 +165,11 @@ export class PixelView {
     this.labels = new MapLabels(container, go);
     this.minimap = new Minimap(container, this.ground, (x, z, glide) => (glide ? this.flyTo(x, z) : this.lookAt(x, z)));
     this.quickJump = new QuickJump(container, go);
-    this.highlights = new Highlights(deps.animals, deps.enclosures, deps.crowd, deps.train);
+    this.highlights = new Highlights(deps.animals, deps.enclosures, deps.train);
     this.bindInput();
     this.resize();
     window.addEventListener('resize', () => this.resize());
+    this.watchPixelRatio();
   }
 
   /** Centre the view on a world point (and optionally set the zoom). */
@@ -173,7 +180,10 @@ export class PixelView {
   }
 
   setVisible(on: boolean): void {
-    for (const el of [this.canvas, this.controls, this.labels.root, this.minimap.root, this.quickJump.root]) el.style.display = on ? '' : 'none';
+    for (const el of [this.canvas, this.controls, this.minimap.root, this.quickJump.root]) el.style.display = on ? '' : 'none';
+    // The labels show or hide themselves by zoom level.
+    if (on) this.labels.update(this.camera, this.zoom);
+    else this.labels.root.style.display = 'none';
     this.visible = on;
   }
 
@@ -289,6 +299,23 @@ export class PixelView {
     const dpr = window.devicePixelRatio || 1;
     this.canvas.width = Math.round(window.innerWidth * dpr);
     this.canvas.height = Math.round(window.innerHeight * dpr);
+    // Zoom levels are whole device pixels per art pixel, so they move when the pixel ratio does
+    // (125% screens, browser zoom). Snap, or clicks, labels and the minimap drift off the drawing.
+    this.zoom = this.nearestLevel(this.zoom);
+    this.minimap.resize();
+  }
+
+  /** Moving the window to a screen with another pixel ratio doesn't always fire 'resize'. */
+  private watchPixelRatio(): void {
+    const query = matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    query.addEventListener(
+      'change',
+      () => {
+        this.resize();
+        this.watchPixelRatio();
+      },
+      { once: true },
+    );
   }
 
   private bindInput(): void {
@@ -325,6 +352,8 @@ export class PixelView {
       else if (drag && performance.now() - drag.t < 80 && Math.hypot(drag.vx, drag.vy) > 0.2) this.fling = { vx: drag.vx, vy: drag.vy };
       drag = null;
     });
+    // The system can take the pointer away mid-drag (a touch turning into a gesture): just stop.
+    for (const type of ['pointercancel', 'lostpointercapture']) this.canvas.addEventListener(type, () => (drag = null));
     this.canvas.addEventListener('pointerleave', () => (this.pointer = null));
     // Map-app controls: on a trackpad, two-finger scroll pans and pinch zooms; a mouse wheel
     // zooms one level per notch. Zoom stays anchored at the cursor.
@@ -517,6 +546,8 @@ export class PixelView {
         p: shade(look.trousers, 0.75),
         F: '#28241f',
         balloon: pick(BALLOONS, 5),
+        // For sprite cache keys (palette lookups only use single letters).
+        id: String(n),
       };
       this.outfits.set(l, o);
     }
@@ -539,8 +570,8 @@ export class PixelView {
     const wave = gesture === 'wave' ? Math.floor(performance.now() / 220) % 2 : 0;
     // Keepers on a feeding run carry the food.
     const feed = v.keeper && v.activity?.kind === 'feed' ? v.activity.feeder.food : null;
-    const key = `person:${Object.values(outfit).join('')}:${v.child}:${f.dir}:${pose}:${f.flip}:${item}:${umbrella}:${gesture}:${flashing}:${wave}:${feed}`;
-    const sprite = cached(key, () => {
+    const key = `person:${outfit.id}:${v.child}:${f.dir}:${pose}:${f.flip}:${item}:${umbrella}:${gesture}:${flashing}:${wave}:${feed}`;
+    const sprite = this.people.get(key, () => {
       const rows = pose === 'sit' ? PERSON_SIT[f.dir] : PERSON[f.dir][pose] ?? PERSON[f.dir].stand;
       // Children: shorter body (and legs, unless they're folded up sitting).
       const kid = v.child ? (pose === 'sit' ? rows.filter((_, i) => i !== 9) : childRows(rows)) : rows;
@@ -587,7 +618,7 @@ export class PixelView {
     for (const e of scene.extras) {
       const outfit = this.outfitFor(e.look);
       const f = facing(e.yaw);
-      const sprite = cached(`extra:${Object.values(outfit).join('')}:${e.kind}:${e.child}:${f.dir}:${f.flip}`, () => {
+      const sprite = this.people.get(`extra:${outfit.id}:${e.kind}:${e.child}:${f.dir}:${f.flip}`, () => {
         const rows = e.kind === 'snorkel' ? PERSON.back.stand.slice(0, 7) : e.kind === 'ring' ? PERSON.front.stand.slice(0, 9) : PERSON[f.dir].stand;
         const base = compile(e.child && e.kind === 'flamingo' ? childRows(rows) : rows, outfit, f.flip);
         if (e.kind === 'flamingo') return base;
@@ -634,6 +665,8 @@ export class PixelView {
     const scale = Math.max(1, Math.round(this.zoom * dpr));
     const w = Math.ceil(this.canvas.width / scale);
     const h = Math.ceil(this.canvas.height / scale);
+    // A minimised or zero-sized window: nothing to draw (and drawImage throws on empty canvases).
+    if (!w || !h) return;
     if (this.art.width !== w || this.art.height !== h) {
       this.art.width = w;
       this.art.height = h;
@@ -649,8 +682,12 @@ export class PixelView {
     actx.fillStyle = '#5c9a3d';
     actx.fillRect(0, 0, w, h);
     actx.drawImage(this.ground, left, top, w, h, 0, 0, w, h);
+    // Read once per frame: each of these builds its list from the 3D instances.
+    const sky = deps.ambient.sky;
+    const smoke = deps.train.smokePuffs;
+    const lost = deps.crowd.lostBalloons;
     this.underwater(left, top, w, h);
-    this.cloudShadows(left, top, w, h);
+    this.cloudShadows(sky, left, top, w, h);
 
     // Everything standing, sorted back to front.
     const drawn: Drawn[] = [];
@@ -671,14 +708,16 @@ export class PixelView {
         const d = this.animal(a);
         if (d) drawn.push(d);
       }
-      for (const v of [...deps.crowd.visitors, ...deps.keepers.active]) {
-        const d = this.person(v);
-        if (d) drawn.push(d);
+      for (const people of [deps.crowd.visitors, deps.keepers.active]) {
+        for (const v of people) {
+          const d = this.person(v);
+          if (d) drawn.push(d);
+        }
       }
     }
     this.flamingos(drawn);
     this.train(drawn);
-    this.butterflies(drawn);
+    this.butterflies(sky, drawn);
     drawn.sort((a, b) => a.y - b.y);
     // Shadows first, so nothing standing gets darkened by a neighbour's shadow.
     for (const p of flat) actx.drawImage(p.sprite, Math.round(p.x - p.ax - left), Math.round(p.y - p.ay - top));
@@ -701,7 +740,7 @@ export class PixelView {
       if (d.icon) icons.push({ x: x + Math.floor(d.sprite.width / 2) + 3, y: y - 9, icon: d.icon });
       if (d.effect) this.effect(d.effect, x, y, d.sprite.width);
     }
-    this.overhead(left, top, w, h);
+    this.overhead(sky, smoke, lost, left, top, w, h);
 
     this.light(night, left, top, w, h);
     this.rain(w, h);
@@ -725,12 +764,12 @@ export class PixelView {
 
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.art, 0, 0, w, h, 0, 0, w * scale, h * scale);
-    const label = `${this.zoom}×`;
+    const label = `${+this.zoom.toFixed(2)}×`;
     if (this.zoomLabel.textContent !== label) this.zoomLabel.textContent = label;
     const cam = this.camera;
     this.labels.update(cam, this.zoom);
     this.minimap.update(cam, deps.animals, deps.train);
-    const moment = this.highlights.check(performance.now());
+    const moment = this.highlights.check(performance.now(), smoke.length > 0, lost);
     if (moment) {
       deps.toast(moment.message, {
         label: 'Watch',
@@ -745,10 +784,10 @@ export class PixelView {
   private readonly cloudSprites = [0, 1, 2, 3].map((i) => cloudShadow(i, PX));
 
   /** Cloud shadows drifting over the ground (faint, under everything standing). */
-  private cloudShadows(left: number, top: number, w: number, h: number): void {
+  private cloudShadows(sky: Sky, left: number, top: number, w: number, h: number): void {
     const { actx } = this;
     actx.globalAlpha = 0.24;
-    for (const c of this.deps.ambient.sky.clouds) {
+    for (const c of sky.clouds) {
       const s = this.cloudSprites[c.seed % this.cloudSprites.length];
       const x = Math.round(toArtX(c.x) - left - s.width / 2);
       const y = Math.round(toArtY(c.z) - top - s.height / 2);
@@ -759,8 +798,8 @@ export class PixelView {
   }
 
   /** Butterflies flutter low among everything else (a fixed-size sprite, so they don't flicker). */
-  private butterflies(out: Drawn[]): void {
-    for (const b of this.deps.ambient.sky.butterflies) {
+  private butterflies(sky: Sky, out: Drawn[]): void {
+    for (const b of sky.butterflies) {
       const open = b.flap > 0.5;
       const sprite = cached(`butterfly:${b.color}:${open}`, () => butterfly(open, b.color));
       out.push({ sprite, x: toArtX(b.x), y: toArtY(b.z), ax: 1, ay: 1 + Math.round(b.y * PX) });
@@ -768,9 +807,8 @@ export class PixelView {
   }
 
   /** Things above the scene: birds and gulls, train smoke, balloons drifting away. */
-  private overhead(left: number, top: number, w: number, h: number): void {
-    const { actx, deps } = this;
-    const sky = deps.ambient.sky;
+  private overhead(sky: Sky, smoke: Train['smokePuffs'], lost: Crowd['lostBalloons'], left: number, top: number, w: number, h: number): void {
+    const { actx } = this;
     const visible = (x: number, y: number) => x > -20 && y > -20 && x < w + 20 && y < h + 20;
     for (const [list, gull] of [[sky.birds, false], [sky.gulls, true]] as const) {
       for (const b of list) {
@@ -782,7 +820,7 @@ export class PixelView {
         actx.drawImage(cached(`flyer:${up}:${gull}`, () => flyer(up, gull)), x, y);
       }
     }
-    for (const p of deps.train.smokePuffs) {
+    for (const p of smoke) {
       const r = Math.max(2, Math.round(p.size * 2.2));
       const s = cached(`puff:${r}`, () => puff(r));
       const x = Math.round(toArtX(p.x) - left - r);
@@ -792,7 +830,7 @@ export class PixelView {
       actx.drawImage(s, x, y);
     }
     actx.globalAlpha = 1;
-    for (const b of deps.crowd.lostBalloons) {
+    for (const b of lost) {
       const x = Math.round(toArtX(b.x) - left);
       const y = Math.round(toArtY(b.z) - b.y * PX - top);
       if (!visible(x, y)) continue;

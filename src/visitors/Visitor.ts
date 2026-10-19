@@ -255,7 +255,6 @@ export class Visitor {
   }
 
   /** The balloon's color, for the one that floats away. */
-
   balloonColor(): THREE.Color | null {
     const mesh = this.balloonProp.children[1] as THREE.Mesh | undefined;
     return mesh ? (mesh.material as THREE.MeshStandardMaterial).color : null;

@@ -595,7 +595,7 @@ export class PixelView {
   /** Cloud shadows drifting over the ground (faint, under everything standing). */
   private cloudShadows(left: number, top: number, w: number, h: number): void {
     const { actx } = this;
-    actx.globalAlpha = 0.14;
+    actx.globalAlpha = 0.24;
     for (const c of this.deps.ambient.sky.clouds) {
       const s = this.cloudSprites[c.seed % this.cloudSprites.length];
       const x = Math.round(toArtX(c.x) - left - s.width / 2);

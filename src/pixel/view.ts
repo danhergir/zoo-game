@@ -19,8 +19,6 @@ import {
   FLAMINGO_PALETTE,
   PERSON,
   PERSON_SIT,
-  TRAIN,
-  TRAIN_PALETTE,
   childRows,
   type Directions,
   type Rows,
@@ -29,6 +27,7 @@ import { bodyEdge, bubble, butterfly, cloudShadow, feedLoad, flyer, puff, withGe
 import { MAP_H, MAP_W, MIN_X, MIN_Z, PX, bakeProps, buildGround, buildProps, toArtX, toArtY, type Prop } from './map';
 import { Highlights, MapLabels, Minimap, QuickJump, type Camera, type Place } from './navigation';
 import { SPECIES_ART } from './species';
+import { HEADLAMP, TRAIN_DIRECTIONS, trainCar } from './train';
 import { SpriteCache, cached, canvas, compile, ellipseSprite, glowSprite, hash2, shade, type Sprite } from './sprite';
 
 export interface PixelDeps {
@@ -79,7 +78,6 @@ const START = { x: -14, z: 0 };
 /** Visitor activities spent sitting down: bench, picnic table, swing, or on the ground (resting, digging in the sand). */
 const SITTING = new Set(['sit', 'picnic', 'swing', 'rest', 'dig']);
 const BALLOONS = ['#e8453a', '#3d7fd0', '#f0c03a', '#4aa05a', '#c77dff', '#ff7aa8'];
-const CARRIAGES = ['#2f6f8f', '#6cc28a', '#ffd23f'];
 /** Person sprites kept around: comfortably more than a full zoo's worth on screen at once. */
 const PEOPLE_CACHE = 800;
 
@@ -134,6 +132,7 @@ export class PixelView {
   private hits: { animal: Animal; x0: number; y0: number; x1: number; y1: number; y: number }[] = [];
   private view = { left: 0, top: 0, w: 1, h: 1 };
   private readonly glow = glowSprite(26, '#ffd27a');
+  private readonly lamp = glowSprite(7, '#fff0b0');
   private readonly shadows = new Map<number, Sprite>();
   /** Visitors keep arriving in new outfits, so their sprites live in a bounded cache. */
   private readonly people = new SpriteCache(PEOPLE_CACHE);
@@ -170,6 +169,7 @@ export class PixelView {
     this.resize();
     window.addEventListener('resize', () => this.resize());
     this.watchPixelRatio();
+    this.warmTrain();
   }
 
   /** Centre the view on a world point (and optionally set the zoom). */
@@ -644,17 +644,44 @@ export class PixelView {
     }
   }
 
+  /** One key per car, for its wheels' turn (distance travelled). */
+  private readonly cars = [{}, {}, {}, {}];
+
   private train(out: Drawn[]): void {
     this.deps.train.carPoses.forEach((c, i) => {
-      const f = facing(c.yaw);
-      const engine = i === 0;
-      const color = CARRIAGES[(i - 1) % CARRIAGES.length] ?? CARRIAGES[0];
-      const rows = f.dir === 'side' ? (engine ? TRAIN.engine : TRAIN.car) : engine ? TRAIN.engineFront : TRAIN.carFront;
-      const sprite = cached(`train:${i}:${f.dir === 'side'}:${f.flip}`, () =>
-        compile(rows, { ...TRAIN_PALETTE, C: color, c: shade(color, 0.7) }, f.flip),
-      );
-      out.push({ sprite, x: toArtX(c.x), y: toArtY(c.z), ax: Math.floor(sprite.width / 2), ay: sprite.height - 1, shadow: Math.round(sprite.width * 0.45) });
+      const wheels = this.track(this.cars[i] ?? this.cars[0], c.x, c.z);
+      const car = trainCar(i, c.yaw, wheels.moving ? wheels.frame : 0);
+      // The sprite's anchor is the car's centre at rail level; its shadow is drawn into the sprite's outline.
+      out.push({ sprite: car.sprite, x: toArtX(c.x), y: toArtY(c.z), ax: car.ax, ay: car.ay, shadow: 0 });
     });
+  }
+
+  /** Draws every heading of every car a few at a time while the page is idle, so none appears mid-ride. */
+  private warmTrain(): void {
+    const jobs: [number, number, number][] = [];
+    for (let i = 0; i < 4; i++) for (let d = 0; d < TRAIN_DIRECTIONS; d++) for (const f of [0, 1]) jobs.push([i, (d / TRAIN_DIRECTIONS) * Math.PI * 2, f]);
+    const idle = window.requestIdleCallback ?? ((cb: () => void) => setTimeout(cb, 50));
+    const next = () => {
+      const job = jobs.shift();
+      if (!job) return;
+      trainCar(...job);
+      idle(next);
+    };
+    idle(next);
+  }
+
+  /** The engine's headlamp at night: a small warm glow at its nose. */
+  private headlamp(night: number, left: number, top: number): void {
+    if (night < 0.02) return;
+    const e = this.deps.train.carPoses[0];
+    const x = Math.round(toArtX(e.x + Math.sin(e.yaw) * HEADLAMP.forward) - left - this.lamp.width / 2);
+    const y = Math.round(toArtY(e.z + Math.cos(e.yaw) * HEADLAMP.forward) - HEADLAMP.height * PX - top - this.lamp.height / 2);
+    const { actx } = this;
+    actx.globalCompositeOperation = 'lighter';
+    actx.globalAlpha = night * 0.6;
+    actx.drawImage(this.lamp, x, y);
+    actx.globalAlpha = 1;
+    actx.globalCompositeOperation = 'source-over';
   }
 
   render(dt: number): void {
@@ -743,6 +770,7 @@ export class PixelView {
     this.overhead(sky, smoke, lost, left, top, w, h);
 
     this.light(night, left, top, w, h);
+    this.headlamp(night, left, top);
     this.rain(w, h);
     // Bubbles stay readable at night, so they're drawn after the light.
     for (const i of icons) {

@@ -25,7 +25,7 @@ import {
   type Rows,
 } from './art';
 import { bubble, withProps, type Bubble } from './extras';
-import { PX, buildGround, buildProps, toArtX, toArtY, type Prop } from './map';
+import { MAP_H, MAP_W, PX, buildGround, buildProps, toArtX, toArtY, type Prop } from './map';
 import { SPECIES_ART } from './species';
 import { cached, canvas, compile, ellipseSprite, glowSprite, hash2, shade, type Sprite } from './sprite';
 
@@ -49,11 +49,21 @@ export interface PixelDeps {
 }
 
 /** CSS pixels per art pixel; only whole steps, so pixels stay square and crisp. */
-const ZOOMS = [1, 2, 3, 4, 5, 6];
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 6;
+/**
+ * Zoom levels: every whole number of *device* pixels per art pixel between MIN and MAX, so on
+ * a retina screen there are half steps (1, 1.5, 2 …) and every level is still perfectly crisp.
+ */
+function zoomLevels(): number[] {
+  const dpr = window.devicePixelRatio || 1;
+  const levels: number[] = [];
+  for (let k = Math.ceil(MIN_ZOOM * dpr); k <= Math.floor(MAX_ZOOM * dpr); k++) levels.push(k / dpr);
+  return levels;
+}
 const START_ZOOM = 3;
-/** Scroll distance (pixels) per zoom step, and the minimum pause between steps. */
-const WHEEL_STEP = 120;
-const WHEEL_PAUSE_MS = 200;
+/** Pinch distance per zoom step (trackpads report pinches as ctrl+wheel). */
+const PINCH_STEP = 20;
 const START = { x: -14, z: 0 };
 const WALKING = new Set(['wander', 'toFeeder', 'toFence', 'toTree', 'toBed', 'toPole', 'toPond', 'toRock', 'play']);
 /** Visitor activities spent sitting down: bench, picnic table, swing, or on the ground (resting, digging in the sand). */
@@ -124,7 +134,7 @@ export class PixelView {
   lookAt(x: number, z: number, zoom?: number): void {
     this.camX = toArtX(x);
     this.camY = toArtY(z);
-    if (zoom !== undefined && ZOOMS.includes(zoom)) this.zoom = zoom;
+    if (zoom !== undefined) this.zoom = this.nearestLevel(zoom);
   }
 
   setVisible(on: boolean): void {
@@ -160,30 +170,48 @@ export class PixelView {
       if (drag && !drag.moved) this.pick(e.clientX, e.clientY);
       drag = null;
     });
-    // Trackpads send many tiny wheel events per swipe: add them up and step one zoom level
-    // per "notch" worth of scrolling, with a short pause between steps.
-    let wheel = 0;
-    let lastWheel = 0;
-    let lastStep = 0;
+    // Map-app controls: on a trackpad, two-finger scroll pans and pinch zooms; a mouse wheel
+    // zooms one level per notch. Zoom stays anchored at the cursor.
+    let pinch = 0;
     this.canvas.addEventListener(
       'wheel',
       (e) => {
         e.preventDefault();
-        const now = performance.now();
-        if (now - lastWheel > 250) wheel = 0;
-        lastWheel = now;
-        wheel += e.deltaY * (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1);
-        if (Math.abs(wheel) < WHEEL_STEP || now - lastStep < WHEEL_PAUSE_MS) return;
-        const i = ZOOMS.indexOf(this.zoom) + (wheel < 0 ? 1 : -1);
-        wheel = 0;
-        lastStep = now;
-        this.zoomTo(ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, i))], e.clientX, e.clientY);
+        const px = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1;
+        if (e.ctrlKey) {
+          pinch -= e.deltaY * px;
+          if (Math.abs(pinch) < PINCH_STEP) return;
+          this.stepZoom(pinch > 0 ? 1 : -1, e.clientX, e.clientY);
+          pinch = 0;
+          return;
+        }
+        // A mouse wheel moves in whole notches (line mode, or ~100px per click with no sideways
+        // movement); a trackpad sends small, often fractional deltas, usually with some deltaX.
+        const notch = e.deltaMode !== 0 || (e.deltaX === 0 && Math.abs(e.deltaY) >= 50 && Number.isInteger(e.deltaY));
+        if (notch) {
+          this.stepZoom(e.deltaY < 0 ? 1 : -1, e.clientX, e.clientY);
+          return;
+        }
+        this.deps.stopFollow();
+        this.camX += (e.deltaX * px) / this.zoom;
+        this.camY += (e.deltaY * px) / this.zoom;
       },
       { passive: false },
     );
     window.addEventListener('keydown', (e) => this.keys.add(e.code));
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
+  }
+
+  private nearestLevel(zoom: number): number {
+    return zoomLevels().reduce((best, z) => (Math.abs(z - zoom) < Math.abs(best - zoom) ? z : best));
+  }
+
+  /** One zoom level in or out (dir +1 / -1), anchored at the cursor. */
+  private stepZoom(dir: number, clientX: number, clientY: number): void {
+    const levels = zoomLevels();
+    const i = levels.indexOf(this.nearestLevel(this.zoom)) + dir;
+    this.zoomTo(levels[Math.max(0, Math.min(levels.length - 1, i))], clientX, clientY);
   }
 
   /** Change zoom keeping the point under the cursor where it is. */
@@ -397,6 +425,9 @@ export class PixelView {
       this.art.width = w;
       this.art.height = h;
     }
+    // Keep the view on the map: it ends at the forest past the train loop.
+    this.camX = MAP_W > w ? Math.min(MAP_W - w / 2, Math.max(w / 2, this.camX)) : MAP_W / 2;
+    this.camY = MAP_H > h ? Math.min(MAP_H - h / 2, Math.max(h / 2, this.camY)) : MAP_H / 2;
     const left = Math.round(this.camX - w / 2);
     const top = Math.round(this.camY - h / 2);
     this.view = { left, top, w, h };

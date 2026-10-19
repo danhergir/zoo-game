@@ -17,6 +17,7 @@ import {
   STAFF_HUT,
   STANDS,
   TRAIN_TRACK,
+  isPath,
 } from '../layout';
 import { blob, canvas, ellipseSprite, hash2, rgb, shade, type Sprite } from './sprite';
 
@@ -25,8 +26,8 @@ export const PX = 8;
 /** World area covered by the map (the zoo, the train loop and a margin). */
 export const MIN_X = -122;
 export const MIN_Z = -120;
-const MAX_X = 122;
-const MAX_Z = 92;
+export const MAX_X = 122;
+export const MAX_Z = 92;
 export const MAP_W = (MAX_X - MIN_X) * PX;
 export const MAP_H = (MAX_Z - MIN_Z) * PX;
 
@@ -650,6 +651,161 @@ function gate(): Prop {
   return { sprite: s, x: toArtX(0), y: toArtY(GATE_Z), ax: s.width / 2, ay: s.height - 1 };
 }
 
+const PINE = { outline: '#1a2c14', dark: '#244a1e', mid: '#336628', light: '#4a8236' };
+
+/** A conifer: stacked tiers lit from the left, a short trunk. */
+function pine(variant: number): Sprite {
+  const w = 14 + (variant % 3) * 2;
+  const h = 26 + (variant % 4) * 3;
+  const s = canvas(w + 2, h + 4);
+  const ctx = s.getContext('2d')!;
+  const cx = s.width / 2;
+  const tiers = 3;
+  const inside = (x: number, y: number) => {
+    for (let t = 0; t < tiers; t++) {
+      const top = (t * h) / (tiers + 0.6);
+      const bottom = top + h / tiers + 4;
+      if (y < top || y > bottom) continue;
+      const half = ((y - top) / (bottom - top)) * (w / 2) * (0.7 + t * 0.15);
+      if (Math.abs(x + 0.5 - cx) <= half) return x + 0.5 - cx;
+    }
+    return null;
+  };
+  const tone = [PINE.dark, PINE.mid, PINE.light];
+  for (let y = 0; y < h + 2; y++) {
+    for (let x = 0; x < s.width; x++) {
+      const dx = inside(x, y);
+      if (dx === null) {
+        const edge = [inside(x - 1, y), inside(x + 1, y), inside(x, y - 1), inside(x, y + 1)].some((v) => v !== null);
+        if (!edge) continue;
+        ctx.fillStyle = PINE.outline;
+      } else {
+        // Lit from the left: left side light, right side dark, checker where they meet.
+        const v = -dx / (w / 2) + ((x + y) % 2 ? 0.12 : -0.12);
+        ctx.fillStyle = tone[v > 0.35 ? 2 : v > -0.35 ? 1 : 0];
+      }
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  ctx.fillStyle = '#3e2816';
+  ctx.fillRect(Math.floor(cx) - 1, h + 1, 3, 3);
+  return s;
+}
+
+/** A small patch of flowers in the grass (flat on the ground). */
+function flowerPatch(variant: number): Sprite {
+  const s = canvas(9, 5);
+  const ctx = s.getContext('2d')!;
+  const colors = ['#f4f0e6', '#f0c03a', '#ff7aa8', '#c77dff', '#e8453a'];
+  for (let i = 0; i < 9; i++) {
+    const x = Math.floor(hash2(variant, i, 21) * 9);
+    const y = Math.floor(hash2(variant, i, 22) * 5);
+    ctx.fillStyle = '#4f8a37';
+    ctx.fillRect(x, Math.min(4, y + 1), 1, 1);
+    ctx.fillStyle = colors[Math.floor(hash2(variant, i, 23) * colors.length)];
+    ctx.fillRect(x, y, 1, 1);
+  }
+  return s;
+}
+
+/**
+ * Decoration that fills the empty grass (2D only; placed by a fixed hash, so it looks the same
+ * every time and touches nothing in the simulation): a forest ring outside the train loop, and
+ * clumps of trees, bushes and flowers in the gaps inside it, kept clear of paths, fences,
+ * ponds, buildings and furniture.
+ */
+function decor(enclosures: Enclosure[]): Prop[] {
+  const props: Prop[] = [];
+  const T = TRAIN_TRACK;
+  const pines = Array.from({ length: 12 }, (_, i) => pine(i));
+  const rounds = Array.from({ length: 4 }, (_, i) => {
+    const r = (1.3 + i * 0.25) * PX;
+    const crown = blob(r * 2, r * 1.8, [
+      { x: r, y: r * 0.9, rx: r, ry: r * 0.85 },
+      { x: r * 0.6, y: r * 0.6, rx: r * 0.6, ry: r * 0.5 },
+    ], LEAVES);
+    const sp = canvas(crown.width, crown.height + 2 * PX);
+    const c = sp.getContext('2d')!;
+    c.fillStyle = '#3e2816';
+    c.fillRect(sp.width / 2 - 1, crown.height - 4, 3, sp.height - crown.height + 4);
+    c.drawImage(crown, 0, 0);
+    return sp;
+  });
+  const bushes = [0, 1, 2].map((i) => {
+    const w = 12 + i * 3;
+    return blob(w, w * 0.65, [{ x: w / 2, y: w * 0.35, rx: w / 2, ry: w * 0.32 }, { x: w * 0.3, y: w * 0.25, rx: w * 0.3, ry: w * 0.22 }], BUSH);
+  });
+  const flowers = Array.from({ length: 6 }, (_, i) => flowerPatch(i));
+  const smallShadow = shadowSprite(PX * 0.9, PX * 0.4);
+  const treeShadow = shadowSprite(PX * 1.4, PX * 0.55);
+
+  const furniture: [number, number, number][] = [
+    ...LAMPS.map(([x, z]): [number, number, number] => [x, z, 1.2]),
+    ...BENCHES.map((b): [number, number, number] => [b.x, b.z, 1.6]),
+    ...STANDS.map((st): [number, number, number] => [st.x, st.z, 2.6]),
+    [GIFT_SHOP.x, GIFT_SHOP.z, 5],
+    [0, GATE_Z, 8],
+  ];
+  const clear = (x: number, z: number, margin: number) =>
+    !isPath(x, z, margin) &&
+    !enclosures.some((e) => e.occupies(x, z, margin + 0.5)) &&
+    !furniture.some(([fx, fz, r]) => Math.hypot(x - fx, z - fz) < r + margin * 0.5);
+
+  const step = 3;
+  for (let gz = MIN_Z + step / 2; gz < MAX_Z; gz += step) {
+    for (let gx = MIN_X + step / 2; gx < MAX_X; gx += step) {
+      const i = Math.round(gx * 10);
+      const j = Math.round(gz * 10);
+      const x = gx + (hash2(i, j, 1) - 0.5) * step * 0.8;
+      const z = gz + (hash2(i, j, 2) - 0.5) * step * 0.8;
+      const roll = hash2(i, j, 3);
+      const variant = Math.floor(hash2(i, j, 4) * 1000);
+      // Distance past the train loop (positive outside it).
+      const q = Math.hypot((x - T.x) / T.rx, (z - T.z) / T.rz);
+      const outside = (q - 1) * Math.min(T.rx, T.rz);
+      let sprite: Sprite | null = null;
+      let flat = false;
+      let shadow: Sprite | null = null;
+      if (outside > 3.5) {
+        // Forest ring.
+        if (roll < 0.85) {
+          sprite = roll < 0.55 ? pines[variant % pines.length] : rounds[variant % rounds.length];
+          shadow = treeShadow;
+        }
+      } else if (Math.abs(outside) < 3) {
+        continue; // keep the track clear
+      } else if (clear(x, z, 3)) {
+        // Open lawn far from paths and fences: lush clumps.
+        if (roll < 0.22) {
+          sprite = roll < 0.1 ? pines[variant % pines.length] : rounds[variant % rounds.length];
+          shadow = treeShadow;
+        } else if (roll < 0.5) {
+          sprite = bushes[variant % bushes.length];
+          shadow = smallShadow;
+        } else if (roll < 0.66) {
+          sprite = flowers[variant % flowers.length];
+          flat = true;
+        }
+      } else if (clear(x, z, 0.8)) {
+        // Close to paths: low planting only, so visitors stay visible.
+        if (roll < 0.18) {
+          sprite = bushes[variant % 2];
+          shadow = smallShadow;
+        } else if (roll < 0.34) {
+          sprite = flowers[variant % flowers.length];
+          flat = true;
+        }
+      }
+      if (!sprite) continue;
+      const ax = toArtX(x);
+      const ay = toArtY(z);
+      if (shadow) props.push({ sprite: shadow, x: ax + 2, y: ay, ax: shadow.width / 2, ay: shadow.height / 2, layer: 'shadow' });
+      props.push({ sprite, x: ax, y: ay, ax: Math.floor(sprite.width / 2), ay: flat ? sprite.height / 2 : sprite.height - 1, layer: flat ? 'shadow' : undefined });
+    }
+  }
+  return props;
+}
+
 /** Every static standing thing on the map. */
 export function buildProps(enclosures: Enclosure[], feeders: Feeder[]): Prop[] {
   const props: Prop[] = [];
@@ -685,6 +841,7 @@ export function buildProps(enclosures: Enclosure[], feeders: Feeder[]): Prop[] {
   for (const s of STANDS) props.push(buildingProp(s.x, s.z, 2.8, 2.2, 1.8, '#efe2c4', '#d6453a', true));
   props.push(gate());
   props.push(...playground());
+  props.push(...decor(enclosures));
   // A few bushes along the avenue, placed by a fixed hash (decoration only).
   for (let z = -16; z <= 22; z += 4) {
     for (const side of [-1, 1]) {

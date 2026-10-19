@@ -67,7 +67,6 @@ const START_ZOOM = 3;
 /** Pinch distance per zoom step (trackpads report pinches as ctrl+wheel). */
 const PINCH_STEP = 20;
 const START = { x: -14, z: 0 };
-const WALKING = new Set(['wander', 'toFeeder', 'toFence', 'toTree', 'toBed', 'toPole', 'toPond', 'toRock', 'play']);
 /** Visitor activities spent sitting down: bench, picnic table, swing, or on the ground (resting, digging in the sand). */
 const SITTING = new Set(['sit', 'picnic', 'swing', 'rest', 'dig']);
 const BALLOONS = ['#e8453a', '#3d7fd0', '#f0c03a', '#4aa05a', '#c77dff', '#ff7aa8'];
@@ -114,7 +113,7 @@ export class PixelView {
   private camY = toArtY(START.z);
   private readonly keys = new Set<string>();
   /** Distance walked per creature, for the walk cycle. */
-  private readonly strides = new WeakMap<object, { x: number; z: number; d: number }>();
+  private readonly strides = new WeakMap<object, { x: number; z: number; d: number; moved: number }>();
   /** Outfit per person, picked once from a hash of their arrival order. */
   private readonly outfits = new WeakMap<PersonLook, Record<string, string>>();
   private nextPerson = 0;
@@ -291,14 +290,60 @@ export class PixelView {
 
   /** Walk-cycle frame from the distance walked since last frame. */
   private stride(o: object, x: number, z: number): number {
+    return this.track(o, x, z).frame;
+  }
+
+  /**
+   * Distance walked (for the walk-cycle frame) and whether it actually moved in the last
+   * moment. Animals' states can flip between walking and idle many times a second; drawing
+   * from real movement keeps their legs from flickering.
+   */
+  private track(o: object, x: number, z: number): { frame: number; moving: boolean } {
+    const now = performance.now();
     let s = this.strides.get(o);
-    if (!s) this.strides.set(o, (s = { x, z, d: 0 }));
+    if (!s) this.strides.set(o, (s = { x, z, d: 0, moved: -Infinity }));
     const step = Math.hypot(x - s.x, z - s.z);
     // Big jumps are teleports (a new day, a reset): don't count them as walking.
     if (step < 1) s.d += step;
+    if (step > 0.004 && step < 1) s.moved = now;
     s.x = x;
     s.z = z;
-    return Math.floor(s.d / 0.45) % 2;
+    return { frame: Math.floor(s.d / 0.45) % 2, moving: now - s.moved < 250 };
+  }
+
+  private readonly facings = new WeakMap<object, { dir: keyof Directions; flip: boolean }>();
+
+  /**
+   * facing() with a little stickiness: a heading wobbling right on the line between two
+   * drawings keeps the one it had, instead of flipping between them every frame.
+   */
+  private facingOf(o: object, yaw: number): { dir: keyof Directions; flip: boolean; dx: number } {
+    const f = facing(yaw);
+    const last = this.facings.get(o);
+    if (last) {
+      const dx = Math.abs(Math.sin(yaw));
+      const dz = Math.abs(Math.cos(yaw));
+      const nearLine = Math.abs(dx - dz * 0.85) < 0.15;
+      if (f.dir !== last.dir && nearLine) {
+        f.dir = last.dir;
+        // Kept the side view: keep facing the way it was facing too.
+        if (f.dir === 'side') f.flip = last.flip;
+      }
+      if (f.dir === 'side' && last.dir === 'side' && dx < 0.15) f.flip = last.flip;
+      if (f.dir !== 'side') f.flip = false;
+    }
+    this.facings.set(o, { dir: f.dir, flip: f.flip });
+    return f;
+  }
+
+  private readonly sideFlips = new WeakMap<object, boolean>();
+
+  /** Left or right for side-only drawings, sticking to the last one while heading nearly up or down. */
+  private sideFlip(o: object, dx: number): boolean {
+    const last = this.sideFlips.get(o);
+    const flip = last !== undefined && Math.abs(dx) < 0.15 ? last : dx < 0;
+    this.sideFlips.set(o, flip);
+    return flip;
   }
 
   private shadow(rx: number): Sprite {
@@ -312,18 +357,19 @@ export class PixelView {
     const baby = a.mother !== null && art.baby !== undefined;
     const set = baby ? art.baby! : art.adult;
     const p = a.position;
-    const f = facing(a.heading);
+    const f = this.facingOf(a, a.heading);
     let dir = f.dir;
     let flip = f.flip;
     let pose = 'stand';
     if (a.swimming) pose = 'swim';
     else if ((a.state === 'sleep' && !a.species.huddles) || a.state === 'roll' || a.state === 'bask') pose = 'sleep';
     else if (a.state === 'eat' || a.state === 'browse') pose = 'eat';
-    else if (WALKING.has(a.state) && this.stride(a, p.x, p.z) === 1) pose = 'walk';
+    const step = this.track(a, p.x, p.z);
+    if (pose === 'stand' && step.moving && step.frame === 1) pose = 'walk';
     // Special poses (lying, grazing, swimming) and babies only exist as side views.
     if ((pose !== 'stand' && pose !== 'walk') || !set[dir].stand) {
       dir = 'side';
-      flip = f.dx < 0;
+      flip = this.sideFlip(a, f.dx);
     }
     const frames = set[dir];
     const used = frames[pose] ? pose : 'stand';

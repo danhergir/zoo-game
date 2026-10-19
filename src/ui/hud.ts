@@ -29,6 +29,7 @@ export class Hud {
         <li><b>G</b>: toggle graphics quality</li>
         <li><b>P</b>: switch 2D / 3D view</li>
         <li><b>+ / − / 0</b>: zoom in, out, whole zoo (2D)</li>
+        <li><b>1–9</b> or the map: jump to a place (2D)</li>
       </ul>`;
 
     root.append(bar, this.toasts, help);
@@ -44,12 +45,24 @@ export class Hud {
     this.clockEl.textContent = `${icon} ${pad(h)}:${pad(minute % 60)}`;
   }
 
-  toast(message: string, kind: 'info' | 'warn' | 'good' = 'info'): void {
+  /** A message that fades after a few seconds; with an action, it gets a button and stays a little longer. */
+  toast(message: string, kind: 'info' | 'warn' | 'good' = 'info', action?: { label: string; onClick: () => void }): void {
     const t = el('div', `toast ${kind}`);
     t.textContent = message;
+    if (action) {
+      const b = el('button', 'toast-action');
+      b.textContent = action.label;
+      b.addEventListener('click', () => {
+        action.onClick();
+        t.classList.add('out');
+        setTimeout(() => t.remove(), 500);
+      });
+      t.append(b);
+    }
     this.toasts.append(t);
-    setTimeout(() => t.classList.add('out'), 3200);
-    setTimeout(() => t.remove(), 3700);
+    const life = action ? 7000 : 3200;
+    setTimeout(() => t.classList.add('out'), life);
+    setTimeout(() => t.remove(), life + 500);
   }
 }
 

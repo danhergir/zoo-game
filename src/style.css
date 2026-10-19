@@ -34,12 +34,83 @@ canvas {
   touch-action: none;
 }
 
-/* 2D view zoom buttons, on the right edge (clear of the info panel and the reverse-zoo corner). */
+/* 2D view navigation: minimap and quick-jump buttons top right, zoom buttons lower right
+   (above the reverse-zoo corner), place names over the map when zoomed out. */
+.minimap {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.minimap canvas {
+  display: block;
+  border-radius: 8px;
+}
+
+.quick-jump {
+  position: absolute;
+  top: 244px;
+  right: 12px;
+  width: 206px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  box-sizing: border-box;
+}
+
+.quick-jump button {
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.quick-jump button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.map-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.map-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 3px 9px;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.map-label:hover {
+  background: rgba(40, 52, 44, 0.92);
+}
+
 .zoom-controls {
   position: absolute;
   right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
+  bottom: 104px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -164,6 +235,23 @@ button {
 
 .toast.good {
   border-left-color: var(--good);
+}
+
+/* A toast with a "go watch" button: the button is clickable even though toasts aren't. */
+.toast-action {
+  margin-left: 10px;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--good);
+  color: #10301a;
+  font-size: 13px;
+  font-weight: 700;
+  pointer-events: auto;
+}
+
+.toast-action:hover {
+  filter: brightness(1.1);
 }
 
 .toast.warn {

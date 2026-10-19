@@ -26,7 +26,8 @@ import {
   type Rows,
 } from './art';
 import { bodyEdge, bubble, butterfly, cloudShadow, feedLoad, flyer, puff, withGesture, withProps, type Bubble } from './extras';
-import { MAP_H, MAP_W, PX, bakeProps, buildGround, buildProps, toArtX, toArtY, type Prop } from './map';
+import { MAP_H, MAP_W, MIN_X, MIN_Z, PX, bakeProps, buildGround, buildProps, toArtX, toArtY, type Prop } from './map';
+import { Highlights, MapLabels, Minimap, QuickJump, type Camera, type Place } from './navigation';
 import { SPECIES_ART } from './species';
 import { cached, canvas, compile, ellipseSprite, glowSprite, hash2, shade, type Sprite } from './sprite';
 
@@ -46,6 +47,10 @@ export interface PixelDeps {
   /** The 3D rig's follow target, shared so the info panel's Follow button works in both views. */
   following: () => THREE.Object3D | null;
   stopFollow: () => void;
+  /** Follow something with the camera (shared with the 3D rig and the info panel). */
+  follow: (target: THREE.Object3D) => void;
+  /** Show a message, optionally with a button (the "Watch" on highlights). */
+  toast: (message: string, action?: { label: string; onClick: () => void }) => void;
   selected: () => Animal | null;
   onPick: (animal: Animal | null) => void;
 }
@@ -66,6 +71,10 @@ function zoomLevels(): number[] {
 const START_ZOOM = 3;
 /** Pinch distance per zoom step (trackpads report pinches as ctrl+wheel). */
 const PINCH_STEP = 20;
+/** Camera glide duration (flyTo), edge-scroll band width (CSS px) and how long to rest there first. */
+const GLIDE_SECONDS = 0.7;
+const EDGE = 14;
+const EDGE_DELAY_MS = 350;
 const START = { x: -14, z: 0 };
 /** Visitor activities spent sitting down: bench, picnic table, swing, or on the ground (resting, digging in the sand). */
 const SITTING = new Set(['sit', 'picnic', 'swing', 'rest', 'dig']);
@@ -126,6 +135,16 @@ export class PixelView {
   /** On-screen zoom buttons (2D view only). */
   private readonly controls = document.createElement('div');
   private readonly zoomLabel = document.createElement('span');
+  private readonly labels: MapLabels;
+  private readonly minimap: Minimap;
+  private readonly quickJump: QuickJump;
+  private readonly highlights: Highlights;
+  /** A camera glide in progress (art pixels), see flyTo. */
+  private glide: { fromX: number; fromY: number; toX: number; toY: number; t: number } | null = null;
+  /** Drag momentum after letting go (CSS pixels per ms). */
+  private fling: { vx: number; vy: number } | null = null;
+  /** Where the pointer is over the map (for edge scrolling), and since when it's been at an edge. */
+  private pointer: { x: number; y: number; edgeSince: number } | null = null;
 
   constructor(container: HTMLElement, private readonly deps: PixelDeps) {
     this.canvas.className = 'pixel-view';
@@ -136,6 +155,11 @@ export class PixelView {
     // The forest past the train loop never overlaps anything moving: paint it into the ground once.
     bakeProps(this.ground, props);
     this.props = props.filter((p) => !p.bake);
+    const go = (p: Place) => this.flyTo(p.x, p.z, 3);
+    this.labels = new MapLabels(container, go);
+    this.minimap = new Minimap(container, this.ground, (x, z, glide) => (glide ? this.flyTo(x, z) : this.lookAt(x, z)));
+    this.quickJump = new QuickJump(container, go);
+    this.highlights = new Highlights(deps.animals, deps.enclosures, deps.crowd, deps.train);
     this.bindInput();
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -149,9 +173,21 @@ export class PixelView {
   }
 
   setVisible(on: boolean): void {
-    this.canvas.style.display = on ? '' : 'none';
-    this.controls.style.display = on ? '' : 'none';
+    for (const el of [this.canvas, this.controls, this.labels.root, this.minimap.root, this.quickJump.root]) el.style.display = on ? '' : 'none';
     this.visible = on;
+  }
+
+  /** Glide the camera to a world point (and zoom level), easing in and out. */
+  flyTo(x: number, z: number, zoom?: number): void {
+    this.deps.stopFollow();
+    this.fling = null;
+    if (zoom !== undefined) this.zoom = this.nearestLevel(zoom);
+    this.glide = { fromX: this.camX, fromY: this.camY, toX: toArtX(x), toY: toArtY(z), t: 0 };
+  }
+
+  /** The view as world coordinates: centre and CSS pixels per world unit. */
+  private get camera(): Camera {
+    return { x: this.camX / PX + MIN_X, z: this.camY / PX + MIN_Z, scale: this.zoom * PX };
   }
 
   private visible = true;
@@ -184,6 +220,59 @@ export class PixelView {
     });
   }
 
+  /** Remembers the pointer position; notes when it first reached a screen edge. */
+  private trackPointer(x: number, y: number, now: number): void {
+    const atEdge = x < EDGE || y < EDGE || x > window.innerWidth - EDGE || y > window.innerHeight - EDGE;
+    const was = this.pointer;
+    this.pointer = { x, y, edgeSince: atEdge ? (was && was.edgeSince ? was.edgeSince : now) : 0 };
+  }
+
+  /** Camera motion for this frame: following, a glide, a fling, keys, or the pointer resting at an edge. */
+  private moveCamera(dt: number): void {
+    const follow = this.deps.following();
+    if (follow) {
+      this.glide = null;
+      this.camX += (toArtX(follow.position.x) - this.camX) * Math.min(1, dt * 6);
+      this.camY += (toArtY(follow.position.z) - this.camY) * Math.min(1, dt * 6);
+    } else if (this.glide) {
+      const g = this.glide;
+      g.t = Math.min(1, g.t + dt / GLIDE_SECONDS);
+      const k = g.t * g.t * (3 - 2 * g.t);
+      this.camX = g.fromX + (g.toX - g.fromX) * k;
+      this.camY = g.fromY + (g.toY - g.fromY) * k;
+      if (g.t >= 1) this.glide = null;
+    }
+    if (this.fling) {
+      this.camX -= (this.fling.vx * dt * 1000) / this.zoom;
+      this.camY -= (this.fling.vy * dt * 1000) / this.zoom;
+      const decay = Math.exp(-dt * 4);
+      this.fling.vx *= decay;
+      this.fling.vy *= decay;
+      if (Math.hypot(this.fling.vx, this.fling.vy) < 0.02) this.fling = null;
+    }
+    const speed = (240 / this.zoom) * dt;
+    let kx = 0;
+    let ky = 0;
+    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) kx -= 1;
+    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) kx += 1;
+    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) ky -= 1;
+    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) ky += 1;
+    // Edge scrolling: only once the pointer has rested at the edge a moment (not just passing by).
+    const p = this.pointer;
+    if (p && p.edgeSince && performance.now() - p.edgeSince > EDGE_DELAY_MS && document.hasFocus()) {
+      if (p.x < EDGE) kx -= 1;
+      if (p.x > window.innerWidth - EDGE) kx += 1;
+      if (p.y < EDGE) ky -= 1;
+      if (p.y > window.innerHeight - EDGE) ky += 1;
+    }
+    if (kx || ky) {
+      this.glide = null;
+      this.deps.stopFollow();
+      this.camX += kx * speed;
+      this.camY += ky * speed;
+    }
+  }
+
   /** Zoom out to the closest level that shows the whole zoo, centred on it. */
   private fit(): void {
     this.deps.stopFollow();
@@ -203,19 +292,28 @@ export class PixelView {
   }
 
   private bindInput(): void {
-    let drag: { x: number; y: number; moved: boolean } | null = null;
+    let drag: { x: number; y: number; moved: boolean; t: number; vx: number; vy: number } | null = null;
     this.canvas.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
-      drag = { x: e.clientX, y: e.clientY, moved: false };
+      drag = { x: e.clientX, y: e.clientY, moved: false, t: performance.now(), vx: 0, vy: 0 };
+      this.glide = null;
+      this.fling = null;
       this.canvas.setPointerCapture(e.pointerId);
     });
     this.canvas.addEventListener('pointermove', (e) => {
+      const now = performance.now();
+      this.trackPointer(e.clientX, e.clientY, now);
       if (!drag) return;
       const dx = e.clientX - drag.x;
       const dy = e.clientY - drag.y;
       if (!drag.moved && Math.hypot(dx, dy) < 5) return;
       if (!drag.moved) this.deps.stopFollow();
       drag.moved = true;
+      // Smoothed drag speed, for the fling when letting go.
+      const dt = Math.max(1, now - drag.t);
+      drag.vx = drag.vx * 0.6 + (dx / dt) * 0.4;
+      drag.vy = drag.vy * 0.6 + (dy / dt) * 0.4;
+      drag.t = now;
       drag.x = e.clientX;
       drag.y = e.clientY;
       this.camX -= dx / this.zoom;
@@ -223,8 +321,11 @@ export class PixelView {
     });
     this.canvas.addEventListener('pointerup', (e) => {
       if (drag && !drag.moved) this.pick(e.clientX, e.clientY);
+      // A quick drag keeps the map sliding for a moment (not if the pointer paused before letting go).
+      else if (drag && performance.now() - drag.t < 80 && Math.hypot(drag.vx, drag.vy) > 0.2) this.fling = { vx: drag.vx, vy: drag.vy };
       drag = null;
     });
+    this.canvas.addEventListener('pointerleave', () => (this.pointer = null));
     // Map-app controls: on a trackpad, two-finger scroll pans and pinch zooms; a mouse wheel
     // zooms one level per notch. Zoom stays anchored at the cursor.
     let pinch = 0;
@@ -248,6 +349,8 @@ export class PixelView {
           return;
         }
         this.deps.stopFollow();
+        this.glide = null;
+        this.fling = null;
         this.camX += (e.deltaX * px) / this.zoom;
         this.camY += (e.deltaY * px) / this.zoom;
       },
@@ -525,17 +628,7 @@ export class PixelView {
 
   render(dt: number): void {
     const { ctx, actx, deps } = this;
-    // Camera: follow the selected animal if asked, else WASD.
-    const follow = deps.following();
-    if (follow) {
-      this.camX += (toArtX(follow.position.x) - this.camX) * Math.min(1, dt * 6);
-      this.camY += (toArtY(follow.position.z) - this.camY) * Math.min(1, dt * 6);
-    }
-    const speed = (240 / this.zoom) * dt;
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) this.camX -= speed;
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) this.camX += speed;
-    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) this.camY -= speed;
-    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) this.camY += speed;
+    this.moveCamera(dt);
 
     const dpr = window.devicePixelRatio || 1;
     const scale = Math.max(1, Math.round(this.zoom * dpr));
@@ -634,6 +727,19 @@ export class PixelView {
     ctx.drawImage(this.art, 0, 0, w, h, 0, 0, w * scale, h * scale);
     const label = `${this.zoom}×`;
     if (this.zoomLabel.textContent !== label) this.zoomLabel.textContent = label;
+    const cam = this.camera;
+    this.labels.update(cam, this.zoom);
+    this.minimap.update(cam, deps.animals, deps.train);
+    const moment = this.highlights.check(performance.now());
+    if (moment) {
+      deps.toast(moment.message, {
+        label: 'Watch',
+        onClick: () => {
+          this.flyTo(moment.x, moment.z, 4);
+          if (moment.follow) deps.follow(moment.follow);
+        },
+      });
+    }
   }
 
   private readonly cloudSprites = [0, 1, 2, 3].map((i) => cloudShadow(i, PX));

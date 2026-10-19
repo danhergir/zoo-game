@@ -161,6 +161,8 @@ const pixel = new PixelView(app, {
   weather: weatherNow,
   following: () => rig.following,
   stopFollow: () => rig.setFollow(null),
+  follow: (target) => rig.setFollow(target),
+  toast: (message, action) => hud.toast(message, 'info', action),
   selected: () => inspector.selected,
   onPick: (animal) => select(animal),
 });

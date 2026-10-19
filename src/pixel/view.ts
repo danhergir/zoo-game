@@ -9,20 +9,17 @@ import type { Train } from '../train';
 import type { GameState } from '../ui/hud';
 import type { Crowd } from '../visitors/Crowd';
 import type { Keepers } from '../visitors/Keepers';
+import type { ReverseZoo } from '../reverse';
+import type { PersonLook } from '../visitors/person';
 import type { Visitor } from '../visitors/Visitor';
 import type { WeatherState } from '../weather';
 import {
   FLAMINGO,
   FLAMINGO_PALETTE,
-  HAIR,
-  KEEPER,
   PERSON,
   PERSON_SIT,
-  SHIRT,
-  SKIN,
   TRAIN,
   TRAIN_PALETTE,
-  TROUSERS,
   childRows,
   type Directions,
   type Rows,
@@ -41,6 +38,7 @@ export interface PixelDeps {
   flamingos: Flamingos;
   lagoon: Lagoon;
   train: Train;
+  reverse: ReverseZoo;
   state: GameState;
   weather: WeatherState;
   /** The 3D rig's follow target, shared so the info panel's Follow button works in both views. */
@@ -58,8 +56,8 @@ const WHEEL_STEP = 120;
 const WHEEL_PAUSE_MS = 200;
 const START = { x: -14, z: 0 };
 const WALKING = new Set(['wander', 'toFeeder', 'toFence', 'toTree', 'toBed', 'toPole', 'toPond', 'toRock', 'play']);
-/** Visitor activities spent sitting down (bench, picnic table, swing). */
-const SITTING = new Set(['sit', 'picnic', 'swing']);
+/** Visitor activities spent sitting down: bench, picnic table, swing, or on the ground (resting, digging in the sand). */
+const SITTING = new Set(['sit', 'picnic', 'swing', 'rest', 'dig']);
 const BALLOONS = ['#e8453a', '#3d7fd0', '#f0c03a', '#4aa05a', '#c77dff', '#ff7aa8'];
 const CARRIAGES = ['#2f6f8f', '#6cc28a', '#ffd23f'];
 
@@ -104,7 +102,7 @@ export class PixelView {
   /** Distance walked per creature, for the walk cycle. */
   private readonly strides = new WeakMap<object, { x: number; z: number; d: number }>();
   /** Outfit per person, picked once from a hash of their arrival order. */
-  private readonly outfits = new WeakMap<Visitor, Record<string, string>>();
+  private readonly outfits = new WeakMap<PersonLook, Record<string, string>>();
   private nextPerson = 0;
   /** Animals drawn last frame, for clicking. */
   private hits: { animal: Animal; x0: number; y0: number; x1: number; y1: number; y: number }[] = [];
@@ -261,13 +259,17 @@ export class PixelView {
   }
 
   private outfit(v: Visitor): Record<string, string> {
-    let o = this.outfits.get(v);
+    return this.outfitFor(v.look);
+  }
+
+  /** Sprite palette for a person's outfit (cached per outfit). */
+  private outfitFor(l: PersonLook): Record<string, string> {
+    let o = this.outfits.get(l);
     if (!o) {
       const n = this.nextPerson++;
       const pick = <T,>(list: T[], salt: number) => list[Math.floor(hash2(n, salt, 11) * list.length)];
-      const look = v.keeper
-        ? KEEPER
-        : { hair: pick(HAIR, 1), skin: pick(SKIN, 2), shirt: pick(SHIRT, 3), trousers: pick(TROUSERS, 4) };
+      // Same colours as their 3D model; a hat shows as the top of the head in the hat's colour.
+      const look = { hair: l.hat ?? l.hair ?? '#5a3a22', skin: l.skin, shirt: l.shirt, trousers: l.pants };
       o = {
         o: '#2a2018',
         k: '#1a1410',
@@ -282,7 +284,7 @@ export class PixelView {
         F: '#28241f',
         balloon: pick(BALLOONS, 5),
       };
-      this.outfits.set(v, o);
+      this.outfits.set(l, o);
     }
     return o;
   }
@@ -310,6 +312,46 @@ export class PixelView {
     });
     top = sprite.height;
     return { sprite, x: toArtX(p.x), y: toArtY(p.z) - p.y * PX, ax: Math.floor(sprite.width / 2), ay: top - 1, shadow: sitting ? 0 : 4 };
+  }
+
+  /** The reverse zoo: animals touring the paths, people in the enclosures and in the water. */
+  private reverseZoo(out: Drawn[]): void {
+    const scene = this.deps.reverse.scene2d;
+    const frame = Math.floor(performance.now() / 260) % 2;
+    for (const t of scene.tourists) {
+      const art = SPECIES_ART[t.species];
+      const f = facing(t.yaw);
+      const pose = t.napping ? 'sleep' : t.walking && frame ? 'walk' : 'stand';
+      const dir = pose === 'sleep' ? 'side' : f.dir;
+      const flip = dir === 'side' ? f.dx < 0 : false;
+      const frames = art.adult[dir];
+      const used = frames[pose] ? pose : 'stand';
+      const sprite = cached(`${t.species}:false:${dir}:${used}:${flip}`, () => compile(frames[used], art.palette, flip));
+      out.push({ sprite, x: toArtX(t.x), y: toArtY(t.z), ax: Math.floor(sprite.width / 2), ay: sprite.height - 1, shadow: Math.round(sprite.width * 0.42) });
+    }
+    for (const v of scene.captives) {
+      const d = this.person(v);
+      if (d) out.push(d);
+    }
+    for (const e of scene.extras) {
+      const outfit = this.outfitFor(e.look);
+      const f = facing(e.yaw);
+      const sprite = cached(`extra:${Object.values(outfit).join('')}:${e.kind}:${e.child}:${f.dir}:${f.flip}`, () => {
+        const rows = e.kind === 'snorkel' ? PERSON.back.stand.slice(0, 7) : e.kind === 'ring' ? PERSON.front.stand.slice(0, 9) : PERSON[f.dir].stand;
+        const base = compile(e.child && e.kind === 'flamingo' ? childRows(rows) : rows, outfit, f.flip);
+        if (e.kind === 'flamingo') return base;
+        // In the water: ripples around the head (and a red swim ring).
+        const s = canvas(base.width + 4, base.height + 2);
+        const c = s.getContext('2d')!;
+        c.drawImage(base, 2, 0);
+        c.fillStyle = e.kind === 'ring' ? '#e8443a' : '#cfe8f0';
+        c.fillRect(0, s.height - 3, s.width, 2);
+        c.fillStyle = '#2a2018';
+        c.fillRect(0, s.height - 1, s.width, 1);
+        return s;
+      });
+      out.push({ sprite, x: toArtX(e.x), y: toArtY(e.z), ax: Math.floor(sprite.width / 2), ay: sprite.height - 1, shadow: e.kind === 'flamingo' ? 4 : 0 });
+    }
   }
 
   private flamingos(out: Drawn[]): void {
@@ -377,13 +419,17 @@ export class PixelView {
       (p.layer === 'shadow' ? flat : drawn).push(p);
     }
     this.hits = [];
-    for (const a of deps.animals) {
-      const d = this.animal(a);
-      if (d) drawn.push(d);
-    }
-    for (const v of [...deps.crowd.visitors, ...deps.keepers.active]) {
-      const d = this.person(v);
-      if (d) drawn.push(d);
+    if (deps.reverse.active) {
+      this.reverseZoo(drawn);
+    } else {
+      for (const a of deps.animals) {
+        const d = this.animal(a);
+        if (d) drawn.push(d);
+      }
+      for (const v of [...deps.crowd.visitors, ...deps.keepers.active]) {
+        const d = this.person(v);
+        if (d) drawn.push(d);
+      }
     }
     this.flamingos(drawn);
     this.train(drawn);

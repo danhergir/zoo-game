@@ -155,6 +155,7 @@ const pixel = new PixelView(app, {
   flamingos,
   lagoon,
   train,
+  reverse,
   state,
   weather: weatherNow,
   following: () => rig.following,

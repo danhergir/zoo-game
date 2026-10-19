@@ -558,26 +558,41 @@ function playground(): Prop[] {
     f.fillRect(cx + 2, 3, 1, beam - 8);
   }
   props.push({ sprite: frame, x: x0, y: toArtY(s0.z) - 1, ax: 0, ay: frame.height - 1 });
-  // Slide: ladder at the north end, chute down to the south.
+  // Slide: a ladder at the north end (rails either side of the chute), a small platform on
+  // top, and the chute running down to the south with side rails and a lip at the bottom.
   const top = Math.round(PLAYGROUND.slide.top * PX);
   const ladderY = toArtY(PLAYGROUND.slide.ladder.z);
   const bottomY = toArtY(PLAYGROUND.slide.bottom.z);
-  const slide = canvas(9, bottomY - ladderY + top + 2);
+  const slide = canvas(11, bottomY - ladderY + top + 3);
   const c = slide.getContext('2d')!;
-  c.fillStyle = '#2a2a2e';
-  c.fillRect(0, 0, 3, top + 2);
-  c.fillRect(6, 0, 3, top + 2);
+  const dark = '#2a2a2e';
+  c.fillStyle = dark;
+  c.fillRect(0, 0, 2, top + 3);
+  c.fillRect(9, 0, 2, top + 3);
   c.fillStyle = '#8a8f99';
-  for (let y = 2; y < top; y += 3) c.fillRect(1, y, 7, 1);
-  const run = slide.height - top - 2;
-  for (let i = 0; i <= run + top; i++) {
-    const y = Math.round((i / (run + top)) * (slide.height - 2));
-    c.fillStyle = '#2a2a2e';
-    c.fillRect(1, y, 7, 2);
-    c.fillStyle = '#f0c03a';
-    c.fillRect(2, y, 5, 1);
+  for (let y = 2; y <= top; y += 2) {
+    c.fillRect(0, y, 2, 1);
+    c.fillRect(9, y, 2, 1);
   }
-  props.push({ sprite: slide, x: toArtX(PLAYGROUND.slide.ladder.x), y: bottomY, ax: 4, ay: slide.height - 1 });
+  c.fillStyle = dark;
+  c.fillRect(1, 0, 9, 3);
+  c.fillStyle = '#c8ccd4';
+  c.fillRect(2, 1, 7, 1);
+  for (let y = 3; y < slide.height - 1; y++) {
+    const lip = y >= slide.height - 4 ? 1 : 0;
+    c.fillStyle = dark;
+    c.fillRect(2 - lip, y, 7 + lip * 2, 1);
+    c.fillStyle = '#d6453a';
+    c.fillRect(3 - lip, y, 1, 1);
+    c.fillRect(7 + lip, y, 1, 1);
+    c.fillStyle = '#f0c03a';
+    c.fillRect(4, y, 3, 1);
+    c.fillStyle = '#f8dc78';
+    c.fillRect(4, y, 1, 1);
+  }
+  c.fillStyle = dark;
+  c.fillRect(1, slide.height - 1, 9, 1);
+  props.push({ sprite: slide, x: toArtX(PLAYGROUND.slide.ladder.x), y: bottomY, ax: 5, ay: slide.height - 1 });
   // Sandbox: a wooden frame flat on the ground.
   const box = canvas(3.2 * PX, 2.6 * PX);
   const b = box.getContext('2d')!;

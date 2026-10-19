@@ -3,7 +3,7 @@ import type { Feeder } from '../feeder';
 import { PLAYGROUND, routeOnPaths, type Spot, type StandItem } from '../layout';
 import { fastForward } from '../fastforward';
 import type { Rng } from '../rng';
-import { buildPerson, type PersonModel } from './person';
+import { buildPerson, type PersonLook, type PersonModel } from './person';
 
 export type Activity =
   | { kind: 'view'; spot: Spot; enclosure: string }
@@ -233,6 +233,11 @@ export class Visitor {
   }
 
   /** The balloon's color, for the one that floats away. */
+  /** Outfit colours (for the 2D view). */
+  get look(): PersonLook {
+    return this.model.look;
+  }
+
   balloonColor(): THREE.Color | null {
     const mesh = this.balloonProp.children[1] as THREE.Mesh | undefined;
     return mesh ? (mesh.material as THREE.MeshStandardMaterial).color : null;

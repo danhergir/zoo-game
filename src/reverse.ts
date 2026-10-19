@@ -4,7 +4,7 @@ import type { SpeciesId } from './animals/species';
 import type { Enclosure } from './enclosure';
 import { BENCHES, DECKS, FLAMINGO_POND, LAGOON, PLAZA, routeOnPaths, type Spot } from './layout';
 import { Rng } from './rng';
-import { buildPerson, type PersonModel } from './visitors/person';
+import { buildPerson, type PersonLook, type PersonModel } from './visitors/person';
 import { Visitor } from './visitors/Visitor';
 
 /**
@@ -170,6 +170,8 @@ class Tourist {
   }
 }
 
+export type ReverseExtra = 'snorkel' | 'ring' | 'flamingo';
+
 /** A person kept in an enclosure. */
 interface Captive {
   person: Visitor;
@@ -187,6 +189,8 @@ export class ReverseZoo {
   private built = false;
   /** People where the animals usually are: snorkeling in the lagoon, in swim rings, flamingo-posing. */
   private readonly extras: ((t: number) => void)[] = [];
+  /** The same extras with what they're doing, for the 2D view. */
+  private readonly extraPeople: { kind: ReverseExtra; model: PersonModel }[] = [];
   private time = 0;
   /** The reverse zoo is a local view, so it doesn't need to match other browsers. */
   private readonly rng = new Rng(`reverse:${Math.random()}`);
@@ -201,6 +205,33 @@ export class ReverseZoo {
 
   get active(): boolean {
     return this.group.visible;
+  }
+
+  /** Everything the reverse zoo shows right now, for the 2D view. */
+  get scene2d(): {
+    tourists: { species: SpeciesId; x: number; z: number; yaw: number; walking: boolean; napping: boolean }[];
+    captives: Visitor[];
+    extras: { kind: ReverseExtra; x: number; z: number; yaw: number; look: PersonLook; child: boolean }[];
+  } {
+    return {
+      tourists: this.tourists.map((t) => ({
+        species: t.species,
+        x: t.root.position.x,
+        z: t.root.position.z,
+        yaw: t.root.rotation.y,
+        walking: t.phase === 'walking',
+        napping: t.phase === 'busy' && t.plan?.kind === 'bench',
+      })),
+      captives: this.captives.map((c) => c.person),
+      extras: this.extraPeople.map(({ kind, model }) => ({
+        kind,
+        x: model.root.position.x,
+        z: model.root.position.z,
+        yaw: model.root.rotation.y,
+        look: model.look,
+        child: model.root.scale.x < 0.8,
+      })),
+    };
   }
 
   set active(on: boolean) {
@@ -283,6 +314,7 @@ export class ReverseZoo {
     const snorkel = new THREE.MeshStandardMaterial({ color: '#ff9a4d', roughness: 0.5 });
     for (let i = 0; i < 4; i++) {
       const p = person();
+      this.extraPeople.push({ kind: 'snorkel', model: p });
       const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.35, 6), snorkel);
       tube.position.set(0.12, 0.3, -0.05);
       p.head.add(tube);
@@ -302,6 +334,7 @@ export class ReverseZoo {
       const ringMat = new THREE.MeshStandardMaterial({ color: '#e8443a', roughness: 0.5 });
       for (let i = 0; i < 3; i++) {
         const p = person();
+        this.extraPeople.push({ kind: 'ring', model: p });
         const ring = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.11, 8, 16).rotateX(Math.PI / 2), ringMat);
         ring.position.y = 1.0;
         p.root.add(ring);
@@ -316,6 +349,7 @@ export class ReverseZoo {
     }
     for (let i = 0; i < 4; i++) {
       const p = person();
+      this.extraPeople.push({ kind: 'flamingo', model: p });
       const a = (i / 4) * Math.PI * 2 + 0.5;
       const x = FLAMINGO_POND.x + Math.cos(a) * 3;
       const z = FLAMINGO_POND.z + Math.sin(a) * 3;

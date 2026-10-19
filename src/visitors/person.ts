@@ -3,6 +3,14 @@ import { skinRig } from '../skin';
 import type { Rng } from '../rng';
 
 /** A small stylized person. Faces +Z with feet at y = 0 (before scaling). */
+export interface PersonLook {
+  skin: string;
+  shirt: string;
+  pants: string;
+  hair: string | null;
+  hat: string | null;
+}
+
 export interface PersonModel {
   root: THREE.Group;
   /** Moved as a whole for bobbing and sitting. */
@@ -18,6 +26,8 @@ export interface PersonModel {
   carry: THREE.Group;
   /** Height of the hip joint. */
   hipHeight: number;
+  /** The colours picked for this person (the 2D view dresses its sprite the same way). */
+  look: PersonLook;
   height: number;
 }
 
@@ -105,11 +115,15 @@ export function buildPerson(child: boolean, keeper: boolean, rng: Rng): PersonMo
   head.position.y = 1.5;
   head.add(part(geo.head, skin, 0, 0.14, 0));
   const hat = keeper ? 0 : rng.next();
+  // Recorded for the 2D view; the picks below happen in exactly the same order as before.
+  const look: PersonLook = { skin, shirt, pants, hair: null, hat: null };
   if (hat < 0.25) {
     const color = keeper ? KEEPER.hat : pick(HATS);
+    look.hat = color;
     head.add(part(geo.brim, color, 0, 0.26, 0), part(geo.crown, keeper ? KEEPER.hat : pick(HATS), 0, 0.33, 0));
   } else {
-    const hair = part(geo.hair, pick(HAIR), 0, 0.16, -0.01);
+    look.hair = pick(HAIR);
+    const hair = part(geo.hair, look.hair, 0, 0.16, -0.01);
     hair.rotation.x = -0.25;
     head.add(hair);
   }
@@ -131,6 +145,7 @@ export function buildPerson(child: boolean, keeper: boolean, rng: Rng): PersonMo
     head: bone(head),
     carry,
     hipHeight,
+    look,
     height: 1.75,
   };
 }

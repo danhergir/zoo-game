@@ -3,7 +3,7 @@ import './style.css';
 import { Animal } from './animals/Animal';
 import { SPECIES } from './animals/species';
 import { CameraRig } from './camera';
-import { DAY_SECONDS, HOUR_SECONDS, RESET_HOUR, lastReset, zooTime } from './clock';
+import { DAY_SECONDS, hourAfterReset, lastReset, pastMidnight, zooTime } from './clock';
 import { Ambient } from './ambient';
 import { Amenities } from './amenities';
 import { fastForward } from './fastforward';
@@ -266,7 +266,7 @@ let simReset = Number.NaN;
 let simSteps = 0;
 
 /** Zoo hour at the current simulation step. */
-const simHour = () => (RESET_HOUR + (simSteps * SIM_STEP) / HOUR_SECONDS) % 24;
+const simHour = () => hourAfterReset(simSteps * SIM_STEP);
 
 function resetSimulation(index: number): void {
   const seed = (name: string) => new Rng(`tiny-zoo:reset ${index}:${name}`);
@@ -369,7 +369,7 @@ window.addEventListener('resize', () => {
 hud.toast('Welcome! Click an animal to see how it’s doing.', 'good');
 
 /** The zoo day the simulation is on (the day of its last 4:00 reset, plus one after midnight). */
-const zooDay = () => simReset + (simHour() < RESET_HOUR ? 1 : 0);
+const zooDay = () => simReset + (pastMidnight(simSteps * SIM_STEP) ? 1 : 0);
 
 /** Shared zoo time in seconds, continuous across days (drives the lagoon's fish and other ambient life). */
 const zooSeconds = () => ((simReset % 1000) + 1000) % 1000 * DAY_SECONDS + simSteps * SIM_STEP;

@@ -121,6 +121,11 @@ export class Train {
     this.group.add(this.smoke);
   }
 
+  /** Engine first, then carriages: where each is and its heading, as of the last update() (for the 2D view). */
+  get carPoses(): { x: number; z: number; yaw: number }[] {
+    return this.cars.map((c) => ({ x: c.position.x, z: c.position.z, yaw: c.rotation.y }));
+  }
+
   /** Place the train for zoo time `t` (seconds) and zoo hour `hour`. */
   update(t: number, hour: number): void {
     const running = hour >= OPEN && hour < CLOSE;

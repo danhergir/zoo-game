@@ -95,6 +95,8 @@ export class Enclosure {
   audience = 0;
   /** Spots just inside the fence, facing the deck, where animals come to say hello. */
   animalSpots: Spot[] = [];
+  /** Every boulder ({x, z, radius, height}), recorded for the 2D view; the sim uses obstacles. */
+  readonly boulders: { x: number; z: number; r: number; h: number }[] = [];
   /** Animal spots currently claimed. */
   readonly takenSpots = new Set<Spot>();
   /** Walkability grids, one per (rounded) animal size and swimming ability. */
@@ -412,6 +414,7 @@ export class Enclosure {
       rock.rotation.set(this.rng.next() * 0.4, this.rng.next() * Math.PI, this.rng.next() * 0.4);
       rock.castShadow = rock.receiveShadow = true;
       this.group.add(rock);
+      this.boulders.push({ x: rock.position.x, z: rock.position.z, r, h: r * rock.scale.y });
       extent = Math.max(extent, offset + r);
     }
     this.obstacles.push({ x: pos.x, z: pos.z, r: extent, solid: true });

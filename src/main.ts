@@ -14,6 +14,7 @@ import { Feeder } from './feeder';
 import { HABITATS } from './habitats';
 import { DECKS, FLAMINGO_POND, LAGOON, isPath } from './layout';
 import { Picker } from './picking';
+import { PixelView } from './pixel/view';
 import { ReverseZoo } from './reverse';
 import { Rng, withSeededRandom } from './rng';
 import { World } from './scene';
@@ -143,6 +144,37 @@ const keepers = new Keepers(
 const crowd = new Crowd(live, { animals, feedingAt: (name) => keepers.feedingAt(name) !== null });
 for (const e of enclosures) e.animalSpots = DECKS.find((d) => d.enclosure === e.name)?.animalSpots ?? [];
 const reverse = new ReverseZoo(world.scene, enclosures);
+
+// 2D pixel-art view of the same simulation (P switches between it and 3D).
+const pixel = new PixelView(app, {
+  animals,
+  crowd,
+  keepers,
+  enclosures,
+  feeders,
+  flamingos,
+  lagoon,
+  train,
+  state,
+  weather: weatherNow,
+  following: () => rig.following,
+  stopFollow: () => rig.setFollow(null),
+  selected: () => inspector.selected,
+  onPick: (animal) => select(animal),
+});
+const VIEW_KEY = 'tiny-zoo:view';
+let pixelMode = true;
+try {
+  pixelMode = localStorage.getItem(VIEW_KEY) !== '3d';
+} catch {
+  // Storage blocked: keep the default.
+}
+function applyView(): void {
+  world.renderer.domElement.style.display = pixelMode ? 'none' : '';
+  world.labelRenderer.domElement.style.display = pixelMode ? 'none' : '';
+  pixel.setVisible(pixelMode);
+}
+applyView();
 
 /**
  * Reverse zoo: hovering the bottom-right corner flips the zoo (people in the
@@ -305,6 +337,17 @@ function watchFrameRate(realDt: number): void {
 }
 
 window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyP') {
+    pixelMode = !pixelMode;
+    try {
+      localStorage.setItem(VIEW_KEY, pixelMode ? '2d' : '3d');
+    } catch {
+      // Storage blocked: the choice lasts until reload.
+    }
+    applyView();
+    hud.toast(pixelMode ? '2D view' : '3D view');
+    return;
+  }
   if (e.code !== 'KeyG') return;
   autoQuality = false;
   quality = quality === 3 ? 0 : 3;
@@ -339,6 +382,10 @@ function frame(dt: number): void {
   }
   hud.update();
 
+  if (pixelMode) {
+    pixel.render(dt);
+    return;
+  }
   world.setTimeOfDay(state.hour, weatherNow);
   rig.update(dt);
   world.render(rig.camera);
@@ -366,6 +413,7 @@ if (import.meta.env.DEV) {
       keepers,
       reverse,
       world,
+      pixel,
       rig,
       isPath,
       weatherAt,

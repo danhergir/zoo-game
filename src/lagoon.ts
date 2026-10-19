@@ -94,7 +94,10 @@ interface School {
   path: Path;
   /** Per-fish offset from the school center (in school space), lag and wiggle phase. */
   fish: { ox: number; oy: number; oz: number; lag: number; phase: number }[];
+  colors: string[];
 }
+
+export type LagoonCreature = { kind: 'fish' | 'ray' | 'turtle' | 'shark'; x: number; z: number; yaw: number; color: string };
 
 /** A small fish: side-flattened body plus a forked tail, facing +z. */
 function fishGeometry(length: number): THREE.BufferGeometry {
@@ -118,7 +121,10 @@ export class Lagoon {
   private readonly q = new THREE.Quaternion();
   private readonly s = new THREE.Vector3();
 
+  private readonly center: { x: number; z: number };
+
   constructor(cx: number, cz: number) {
+    this.center = { x: cx, z: cz };
     const rng = new Rng('tiny-zoo:lagoon');
     const statics = new THREE.Group();
     this.buildTank(statics);
@@ -137,6 +143,25 @@ export class Lagoon {
     this.buildShark(life);
     // The water surface goes last so the fish show through it.
     this.buildWater(life);
+  }
+
+  /** Everything swimming, in world coordinates, as of the last update() (for the 2D view). */
+  get creatures(): LagoonCreature[] {
+    const { x: cx, z: cz } = this.center;
+    const out: LagoonCreature[] = [];
+    for (const school of this.schools) {
+      for (let i = 0; i < school.fish.length; i++) {
+        school.mesh.getMatrixAt(i, this.m);
+        const e = this.m.elements;
+        out.push({ kind: 'fish', x: cx + e[12], z: cz + e[14], yaw: Math.atan2(e[8], e[10]), color: school.colors[i % school.colors.length] });
+      }
+    }
+    for (const r of this.rays) out.push({ kind: 'ray', x: cx + r.root.position.x, z: cz + r.root.position.z, yaw: r.root.rotation.y, color: '#5a6470' });
+    const t = this.turtle.root;
+    out.push({ kind: 'turtle', x: cx + t.position.x, z: cz + t.position.z, yaw: t.rotation.y, color: '#4a7a3a' });
+    const sh = this.shark.root;
+    out.push({ kind: 'shark', x: cx + sh.position.x, z: cz + sh.position.z, yaw: sh.rotation.y, color: '#7d8a94' });
+    return out;
   }
 
   /** Move everything to zoo time `t` (seconds). */
@@ -352,7 +377,7 @@ export class Lagoon {
       mesh.castShadow = true;
       mesh.frustumCulled = false;
       g.add(mesh);
-      this.schools.push({ mesh, fish, path: randomPath(rng, spec.reach, spec.y, spec.speed) });
+      this.schools.push({ mesh, fish, colors: spec.colors, path: randomPath(rng, spec.reach, spec.y, spec.speed) });
     }
   }
 

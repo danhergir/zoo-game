@@ -27,6 +27,7 @@ export class Hud {
         <li><b>Wheel</b>: zoom</li>
         <li><b>Click animal</b>: inspect</li>
         <li><b>G</b>: toggle graphics quality</li>
+        <li><b>P</b>: switch 2D / 3D view</li>
       </ul>`;
 
     root.append(bar, this.toasts, help);

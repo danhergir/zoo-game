@@ -24,7 +24,11 @@ interface Bird {
   period: number;
   phase: number;
   facing: number;
+  /** What the bird is doing this frame (for the 2D view). */
+  pose?: FlamingoPose;
 }
+
+export type FlamingoPose = 'stand' | 'walk' | 'feed' | 'sleep';
 
 const LEG = 0.55; // thigh and shin length
 const HIP_Y = LEG * 2 + 0.04;
@@ -104,6 +108,11 @@ export class Flamingos {
     }
   }
 
+  /** Where each bird is and what it's doing, as of the last update() (for the 2D view). */
+  get poses(): { x: number; z: number; yaw: number; pose: FlamingoPose }[] {
+    return this.birds.map((b) => ({ x: b.root.position.x, z: b.root.position.z, yaw: b.root.rotation.y, pose: b.pose ?? 'stand' }));
+  }
+
   /** Pose every bird for zoo time `t` (seconds) at zoo hour `hour`. */
   update(t: number, hour: number): void {
     const night = hour < 6.3 || hour > 20.2;
@@ -116,7 +125,9 @@ export class Flamingos {
       let headPitch = 0.6;
       let oneLeg = true;
       let walk = 0;
+      let pose: FlamingoPose = 'stand';
       if (night) {
+        pose = 'sleep';
         neck = [-0.9, 2.4, 0.4]; // folded back, head resting on the back
         headPitch = 1.2;
       } else if (u < 0.3) {
@@ -132,6 +143,7 @@ export class Flamingos {
         yaw = Math.atan2(to.x - from.x, to.z - from.z);
         oneLeg = false;
         walk = t * 3.2 + b.phase * 10;
+        pose = 'walk';
       } else if (u < 0.75) {
         // Feeding at the far spot: head down in the water, sweeping side to side.
         x = b.away.x;
@@ -140,11 +152,13 @@ export class Flamingos {
         headPitch = 1.4 + Math.sin(t * 2 + b.phase) * 0.15;
         yaw = b.facing + Math.sin(t * 0.9 + b.phase * 7) * 0.35;
         oneLeg = false;
+        pose = 'feed';
       } else {
         oneLeg = false;
       }
       b.root.position.set(x, 0, z);
       b.root.rotation.y = yaw;
+      b.pose = pose;
       b.neck.forEach((seg, i) => (seg.rotation.x = neck[i]));
       b.head.rotation.x = headPitch;
       // One leg tucked up under the body, or both down (stepping when wading).

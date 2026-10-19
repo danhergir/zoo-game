@@ -34,6 +34,15 @@ canvas {
   touch-action: none;
 }
 
+/* 2D pixel-art view: drawn at art resolution and scaled up in whole steps. */
+.pixel-view {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
 button {
   font: inherit;
   color: inherit;
